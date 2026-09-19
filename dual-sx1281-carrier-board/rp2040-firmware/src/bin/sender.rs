@@ -47,7 +47,9 @@ async fn main(_spawner: Spawner) {
         rx_boost: false,
     };
     let iv = GenericSx126xInterfaceVariant::new(reset, dio1, busy, None, None).unwrap();
-    let mut lora = LoRa::new(Sx126x::new(spi, iv, config), true, Delay).await.unwrap();
+    let mut lora = LoRa::new(Sx126x::new(spi, iv, config), true, Delay)
+        .await
+        .unwrap();
     info!("Created lora");
     let mdltn_params = {
         match lora.create_modulation_params(
