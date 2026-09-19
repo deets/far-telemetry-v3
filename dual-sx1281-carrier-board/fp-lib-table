@@ -1,0 +1,4 @@
+(fp_lib_table
+	(version 7)
+	(lib (name "deets") (type "KiCad") (uri "${KIPRJMOD}/modules/deets-kicad-lib/deets.pretty") (options "") (descr ""))
+)

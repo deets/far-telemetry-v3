@@ -1,0 +1,3 @@
+[submodule "dual-sx1281-carrier-board/modules/deets-kicad-lib"]
+	path = dual-sx1281-carrier-board/modules/deets-kicad-lib
+	url = git@github.com:deets/kicad-lib.git
