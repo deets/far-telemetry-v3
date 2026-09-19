@@ -1,3 +1,6 @@
 [submodule "dual-sx1281-carrier-board/modules/deets-kicad-lib"]
 	path = dual-sx1281-carrier-board/modules/deets-kicad-lib
 	url = git@github.com:deets/kicad-lib.git
+[submodule "dual-sx1281-carrier-board/rp2040-firmware/modules/lora-rs"]
+	path = dual-sx1281-carrier-board/rp2040-firmware/modules/lora-rs
+	url = https://github.com/lora-rs/lora-rs.git
