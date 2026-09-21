@@ -10,10 +10,10 @@ use embassy_rp::gpio::{Input, Level, Output, Pin, Pull};
 use embassy_rp::spi::{Config, Spi};
 use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
-use lora_phy::iv::GenericSx126xInterfaceVariant;
-use lora_phy::sx126x::{Sx1262, Sx126x, TcxoCtrlVoltage};
+use lora_phy::iv::GenericSx128xInterfaceVariant;
+use lora_phy::sx128x::{Sx1281, Sx128x,};
 use lora_phy::LoRa;
-use lora_phy::{mod_params::*, sx126x};
+use lora_phy::{mod_params::*, sx128x};
 use {defmt_rtt as _, panic_probe as _};
 
 const LORA_FREQUENCY_IN_HZ: u32 = 433_000_000; // warning: set this appropriately for the region
@@ -22,39 +22,40 @@ const LORA_FREQUENCY_IN_HZ: u32 = 433_000_000; // warning: set this appropriatel
 async fn main(_spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
-    let mut rf_sw = Output::new(p.PIN_4.degrade(), Level::Low);
-    let nss = Output::new(p.PIN_3.degrade(), Level::High);
-    let reset = Output::new(p.PIN_15.degrade(), Level::High);
-    let dio1 = Input::new(p.PIN_20.degrade(), Pull::None);
-    let busy = Input::new(p.PIN_2.degrade(), Pull::None);
+    let nss = Output::new(p.PIN_13.degrade(), Level::High);
+    let busy = Input::new(p.PIN_17.degrade(), Pull::None);
+    let reset = Output::new(p.PIN_18.degrade(), Level::High);
+    let irq = Input::new(p.PIN_16.degrade(), Pull::None);
+    let rx_en = Output::new(p.PIN_15.degrade(), Level::Low);
+    let tx_en = Output::new(p.PIN_19.degrade(), Level::Low);
 
     let spi = Spi::new(
         p.SPI1,
-        p.PIN_10,
+        p.PIN_14,
         p.PIN_11,
         p.PIN_12,
         p.DMA_CH0,
         p.DMA_CH1,
         Config::default(),
     );
-    rf_sw.set_high();
+
     let spi = ExclusiveDevice::new(spi, nss, Delay);
     info!("Created SPI");
-    let config = sx126x::Config {
-        chip: Sx1262,
-        tcxo_ctrl: Some(TcxoCtrlVoltage::Ctrl1V7),
-        use_dcdc: true,
+    let config = sx128x::Config {
+        chip: Sx1281,
+        tcxo_used: true,
+        tx_boost: true,
         rx_boost: false,
     };
-    let iv = GenericSx126xInterfaceVariant::new(reset, dio1, busy, None, None).unwrap();
-    let mut lora = LoRa::new(Sx126x::new(spi, iv, config), true, Delay)
+    let iv = GenericSx128xInterfaceVariant::new(reset, irq, busy, Some(rx_en), Some(tx_en)).unwrap();
+    let mut lora = LoRa::new(Sx128x::new(spi, iv, config), true, Delay)
         .await
         .unwrap();
     info!("Created lora");
     let mdltn_params = {
         match lora.create_modulation_params(
             SpreadingFactor::_12,
-            Bandwidth::_500KHz,
+            Bandwidth::_400KHz,
             CodingRate::_4_8,
             LORA_FREQUENCY_IN_HZ,
         ) {
@@ -79,7 +80,6 @@ async fn main(_spawner: Spawner) {
     let mut buffer = [0x00; 64];
     let mut packet_count = 0xf0;
     loop {
-        rf_sw.toggle();
         info!("prepare send packet");
         for b in buffer.iter_mut() {
             *b = packet_count as u8;
