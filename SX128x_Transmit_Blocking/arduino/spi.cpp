@@ -22,7 +22,7 @@ uint8_t SPIClass::transfer(uint8_t outgoing) {
   return 0;
 }
 void SPIClass::endTransaction() {
-  std::cout << std::format("{}", current().opcode) << "\n";
+  std::cout << std::format("{}", current()) << "\n";
 }
 
 void SPIClass::end() {}
@@ -130,4 +130,8 @@ std::string_view to_string( OpCode opcode ) {
         break;
     }
     return "<unknown>";
+}
+
+
+std::string_view to_string(Transaction transaction) {
 }

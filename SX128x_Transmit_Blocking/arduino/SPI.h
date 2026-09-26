@@ -136,21 +136,23 @@ std::string_view to_string( OpCode opcode );
 
 template<>
 struct std::formatter<OpCode> : std::formatter<std::string_view> {
-    auto format( OpCode direction, auto& context ) const {
-        return std::formatter<std::string_view>::format( to_string( direction ), context );
+    auto format( OpCode opcode, auto& context ) const {
+        return std::formatter<std::string_view>::format( to_string( opcode ), context );
     }
 };
 
 
 
-template <>
-struct std::formatter<Transaction> {
-    constexpr auto parse( format_parse_context& context ) {
-        return context.begin();
-    }
 
-    template <typename FormatContext>
-    auto format( const Transaction& transaction, FormatContext& context ) {
-        return std::format_to( context.out(), "{}: ", transaction.opcode );
-    }
+
+template<>
+class std::formatter<Transaction> {
+public:
+  constexpr auto parse( auto& context ) {
+    return context.begin();
+  }
+
+  auto format( const Transaction& transaction, auto& context ) const {
+    return std::format_to( context.out(), "OpCode: {} ->", transaction.opcode );
+  }
 };
