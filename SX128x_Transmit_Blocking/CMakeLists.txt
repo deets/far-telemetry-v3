@@ -37,7 +37,7 @@ set(sources
 add_executable(radiolib-test ${sources})
 
 target_compile_definitions(radiolib-test PUBLIC RADIOLIB_BUILD_ARDUINO)
-target_compile_options(radiolib-test PUBLIC -std=c++20 -Wall)
+target_compile_options(radiolib-test PUBLIC -std=c++23 -Wall)
 
 # this lets me include files relative to the root source directory with a <> pair
 target_include_directories(

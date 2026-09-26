@@ -1,3 +1,4 @@
+#
 * Dual Carrier Board
 
 ** Breadboard Setup
@@ -10,8 +11,8 @@
 |------------+---------------------+----------|
 |          1 |                  17 | 3V3      |
 |          2 |                  18 | GND      |
-|          3 |                  19 | SPI RX   |
-|          4 |                  20 | SPI TX   |
+|          3 |                  19 | SPI TX   |
+|          4 |                  20 | SPI RX   |
 |          5 |                  21 | SPI CLK  |
 |          6 |                  22 | SPI CS   |
 |          7 |                  23 | GND      |
@@ -41,3 +42,5 @@
 |         18 |        24 | LORA2_NRST  |
 |         19 |        25 | LORA2_TX_EN |
 |------------+-----------+-------------|
+
+[[file:assets/picow-pinout.svg]]
