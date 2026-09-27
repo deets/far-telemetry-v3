@@ -1,2 +1,2 @@
-set debuginfod enabled on
+set debuginfod enabled off
 b SPIClass::unknownOpCode

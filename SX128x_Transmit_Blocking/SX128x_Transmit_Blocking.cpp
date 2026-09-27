@@ -24,10 +24,10 @@
 #include <RadioLib.h>
 
 // SX1280 has the following connections:
-// NSS pin:   10
-// DIO1 pin:  2
-// NRST pin:  3
-// BUSY pin:  9
+// NSS pin:   13
+// DIO1 pin:  16
+// NRST pin:  18
+// BUSY pin:  17
 SX1280 radio = new Module(13, 16, 18, 17);
 
 // or detect the pinout automatically using RadioBoards
@@ -39,6 +39,7 @@ Radio radio = new RadioModule();
 */
 
 void setup() {
+  declareBusyPin(17);
   Serial.
       begin(9600);
 

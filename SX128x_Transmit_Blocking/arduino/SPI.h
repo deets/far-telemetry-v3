@@ -1,10 +1,12 @@
 // -*- mode: c++-mode
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <stdint.h>
 #include <vector>
 #include <format>
 #include <iostream>
+#include <sstream>
 #include <string_view>
 
 enum SPIBitOrder { MSBFIRST };
@@ -97,11 +99,26 @@ enum class OpCode {
 
 struct Transaction {
   OpCode opcode;
+  bool open = true;
+  size_t count = 0;
   std::vector<uint8_t> outgoing;
 
-  void append(uint8_t outgoing) {
-    this->outgoing.push_back(outgoing);
+  uint8_t transact(uint8_t outgoing) {
+    if(open) {
+      this->outgoing.push_back(outgoing);
+      if (count == 0) {
+        // At least for SetStandby the result is 0x43,
+        // I'll use that for all now
+        return 0x43;
+      } else {
+        return 0;
+      }
+    } else {
+      throw std::runtime_error("Transaction closed");
+    }
   }
+
+  void end() { open = false; };
 
 };
 
@@ -125,7 +142,7 @@ private:
   bool _transfer_after_transaction = false;
 
   Transaction &current();
-  void addTransaction(OpCode);
+  void addTransaction(OpCode, bool is_busy);
   std::vector<Transaction> _transactions;
 };
 
@@ -153,6 +170,24 @@ public:
   }
 
   auto format( const Transaction& transaction, auto& context ) const {
-    return std::format_to( context.out(), "OpCode: {} ->", transaction.opcode );
+    return std::format_to( context.out(), "OpCode: {} -> {}", transaction.opcode, transaction.outgoing );
+  }
+};
+
+template<>
+class std::formatter<std::vector<uint8_t>> {
+public:
+  constexpr auto parse( auto& context ) {
+    return context.begin();
+  }
+
+  auto format(const std::vector<uint8_t> &bytes, auto &context) const {
+    std::stringstream ss;
+    ss << "[";
+    for (const auto &c : bytes) {
+      ss << std::format("{:02X}", c) << ", ";
+    }
+    ss << "]";
+    return std::format_to( context.out(), "{}", ss.str() );
   }
 };

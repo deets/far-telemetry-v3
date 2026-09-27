@@ -42,3 +42,6 @@ void tone(uint32_t pin, unsigned int frequency, uint32_t duration);
 void noTone(uint32_t pin);
 void yield();
 uint32_t digitalPinToInterrupt(uint32_t pin);
+
+void declareBusyPin(int);
+void fakeBusy();

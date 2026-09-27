@@ -1,5 +1,6 @@
 #include "SPI.h"
 #include <iostream>
+#include "Arduino.h"
 
 SPIClass SPI;
 
@@ -16,21 +17,24 @@ uint8_t SPIClass::transfer(uint8_t outgoing) {
   if (_transfer_after_transaction) {
     transferAfterTransaction(outgoing);
     _transfer_after_transaction = false;
-  } else {
-    current().append(outgoing);
   }
-  return 0;
+  return current().transact(outgoing);
 }
 void SPIClass::endTransaction() {
   std::cout << std::format("{}", current()) << "\n";
+  current().end();
 }
 
-void SPIClass::end() {}
+void SPIClass::end() {
+}
 
 void SPIClass::transferAfterTransaction(uint8_t outgoing) {
   switch (outgoing) {
   case 0:
-    addTransaction(OpCode::NoOp);
+    addTransaction(OpCode::NoOp, false);
+    break;
+  case 0x80:
+    addTransaction(OpCode::SetStandby, true);
     break;
   default:
     unknownOpCode(outgoing);
@@ -41,8 +45,11 @@ void SPIClass::unknownOpCode(uint8_t outgoing) {
   std::printf("unknownOpCode: 0x%02X\n", outgoing);
 }
 
-void SPIClass::addTransaction(OpCode opcode) {
+void SPIClass::addTransaction(OpCode opcode, bool is_busy) {
   _transactions.emplace_back(opcode);
+  if (is_busy) {
+    fakeBusy();
+  }
 }
 
 Transaction &SPIClass::current() {
@@ -130,8 +137,4 @@ std::string_view to_string( OpCode opcode ) {
         break;
     }
     return "<unknown>";
-}
-
-
-std::string_view to_string(Transaction transaction) {
 }
