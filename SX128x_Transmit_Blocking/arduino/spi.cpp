@@ -2,6 +2,50 @@
 #include <iostream>
 #include "Arduino.h"
 
+std::string_view to_string( OpCode opcode );
+
+template<>
+struct std::formatter<OpCode> : std::formatter<std::string_view> {
+    auto format( OpCode opcode, auto& context ) const {
+        return std::formatter<std::string_view>::format( to_string( opcode ), context );
+    }
+};
+
+
+
+
+
+template<>
+class std::formatter<Transaction> {
+public:
+  constexpr auto parse( auto& context ) {
+    return context.begin();
+  }
+
+  auto format( const Transaction& transaction, auto& context ) const {
+    return std::format_to( context.out(), "OpCode: {} -> {}", transaction.opcode, transaction.outgoing );
+  }
+};
+
+template<>
+class std::formatter<std::vector<uint8_t>> {
+public:
+  constexpr auto parse( auto& context ) {
+    return context.begin();
+  }
+
+  auto format(const std::vector<uint8_t> &bytes, auto &context) const {
+    std::stringstream ss;
+    ss << "[";
+    for (const auto &c : bytes) {
+      ss << std::format("{:02X}", c) << ", ";
+    }
+    ss << "]";
+    return std::format_to( context.out(), "{}", ss.str() );
+  }
+};
+
+
 SPIClass SPI;
 
 
@@ -36,6 +80,8 @@ void SPIClass::transferAfterTransaction(uint8_t outgoing) {
   case 0x80:
     addTransaction(OpCode::SetStandby, true);
     break;
+  case 0x19:
+    addTransaction(OpCode::ReadRegister, false);
   default:
     unknownOpCode(outgoing);
   }
