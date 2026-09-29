@@ -8,7 +8,9 @@ public:
 
   void print(const char *);
   void println(const char *);
-  void println(int, int base=DEC);
+  void println(int, int base = DEC);
+  void println(const String &);
+  void print(const float);
 };
 
 

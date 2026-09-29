@@ -5,16 +5,6 @@
 #include "common.h"
 #include "Serial.h"
 
-class String : public std::string {
-public:
-  using std::string::string;
-  String(int, int base = DEC);
-
-  friend String operator+(const char*, const String&);
-};
-
-String operator+(const char *, const String &);
-
 void delay(int ms);
 void delayMicroseconds(int us);
 unsigned long millis();
@@ -44,4 +34,7 @@ void yield();
 uint32_t digitalPinToInterrupt(uint32_t pin);
 
 void declareBusyPin(int);
+void declareIrqPin(int);
 void fakeBusy();
+void setIrqMask(uint16_t);
+uint16_t getIrqMask();

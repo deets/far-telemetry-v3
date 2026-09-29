@@ -1,11 +1,15 @@
-#include <sstream>
-
 #include "Arduino.h"
+
+#include <sstream>
+#include <optional>
+
 
 enum class BusyPin { Nop, Low, High };
 
 static uint32_t s_busy_pin = -1;
+static uint32_t s_irq_pin = -1;
 static BusyPin s_fake_busy = BusyPin::Nop;
+static uint16_t s_irq_mask = 0;
 
 void delay(int) {}
 
@@ -47,6 +51,9 @@ int digitalRead(uint32_t pin) {
       return 1;
     }
   }
+  if (pin == s_irq_pin && s_irq_mask) {
+    return 1;
+  }
   return 0;
   }
 void attachInterrupt(int, void (*)(void), uint32_t) {}
@@ -69,6 +76,18 @@ void declareBusyPin(int pin) {
   s_busy_pin = pin;
 }
 
+void declareIrqPin(int pin) {
+  s_irq_pin = pin;
+}
+
 void fakeBusy() {
   s_fake_busy = BusyPin::High;
+}
+
+void setIrqMask(uint16_t mask) {
+  s_irq_mask = mask;
+}
+
+uint16_t getIrqMask() {
+  return s_irq_mask;
 }

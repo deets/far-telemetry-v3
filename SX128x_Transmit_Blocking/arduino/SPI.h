@@ -4,10 +4,7 @@
 #include <cstdint>
 #include <stdint.h>
 #include <vector>
-#include <format>
-#include <iostream>
-#include <sstream>
-#include <string_view>
+#include <optional>
 #include <map>
 
 enum SPIBitOrder { MSBFIRST };
@@ -150,6 +147,8 @@ enum class Register : uint16_t {
   VersionString = 0x1F0
 };
 
+enum class PacketType { Gfsk = 0, LoRa = 1, Ranging = 2, Flrc = 3, Ble = 4 };
+
 enum class OpCode {
   NoOp = 0,
   // Operational Modes Functions
@@ -240,17 +239,26 @@ struct Transaction {
   bool open;
   std::vector<uint8_t> outgoing;
   std::map<Register, std::vector<uint8_t>> &registers;
-  Transaction(OpCode opcode, std::map<Register, std::vector<uint8_t>>& registers)
-    : opcode{opcode}, open{true}, registers{registers} {}
+  PacketType& packet_type;
+  Transaction(OpCode opcode, std::map<Register, std::vector<uint8_t>>& registers, PacketType& packet_type)
+    : opcode{opcode}, open{true}, registers{registers}, packet_type{packet_type} {}
 
   uint8_t transact(uint8_t outgoing);
 
   uint8_t readRegister();
+  uint8_t writeRegister();
+  void storeRegister();
+  uint8_t setPacketType();
+  uint8_t getPacketType();
+  uint8_t getIrqStatus();
+  uint8_t getRxBufferStatus();
+  uint8_t getPacketStatus();
+  uint8_t readBuffer();
 
   size_t count() const {
     return outgoing.size();
   }
-  void end() { open = false; };
+  void end();
 
   std::optional<Register> register_to_work_on;
 };
@@ -278,6 +286,7 @@ private:
   void addTransaction(OpCode, bool is_busy);
   std::vector<Transaction> _transactions;
   std::map<Register, std::vector<uint8_t>> _registers;
+  PacketType _packet_type = PacketType::Gfsk;
 };
 
 

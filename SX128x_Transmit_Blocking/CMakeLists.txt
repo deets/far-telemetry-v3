@@ -13,7 +13,6 @@ project(radiolib_test)
 # invoked and put all files that match the pattern in the variables
 # `sources` and `data`
 set(sources
-  SX128x_Transmit_Blocking.cpp
   RadioLib/src/modules/SX128x/SX1281.cpp
   RadioLib/src/modules/SX128x/SX128x.cpp
   RadioLib/src/modules/SX128x/SX1280.cpp
@@ -34,14 +33,29 @@ set(sources
 ###############################################################################
 
 # add the data to the target, so it becomes visible in some IDE
-add_executable(radiolib-test ${sources})
+add_executable(radiolib-transmit-test SX128x_Transmit_Blocking.cpp ${sources})
 
-target_compile_definitions(radiolib-test PUBLIC RADIOLIB_BUILD_ARDUINO)
-target_compile_options(radiolib-test PUBLIC -std=c++23 -Wall)
+target_compile_definitions(radiolib-transmit-test PUBLIC RADIOLIB_BUILD_ARDUINO)
+target_compile_options(radiolib-transmit-test PUBLIC -std=c++23 -Wall)
 
 # this lets me include files relative to the root source directory with a <> pair
 target_include_directories(
-  radiolib-test PUBLIC
+  radiolib-transmit-test PUBLIC
+  arduino
+  RadioLib/src/modules/SX128x
+  RadioLib/src
+  )
+
+
+# add the data to the target, so it becomes visible in some IDE
+add_executable(radiolib-receive-test SX128x_Receive_Blocking.cpp ${sources})
+
+target_compile_definitions(radiolib-receive-test PUBLIC RADIOLIB_BUILD_ARDUINO)
+target_compile_options(radiolib-receive-test PUBLIC -std=c++23 -Wall)
+
+# this lets me include files relative to the root source directory with a <> pair
+target_include_directories(
+  radiolib-receive-test PUBLIC
   arduino
   RadioLib/src/modules/SX128x
   RadioLib/src
