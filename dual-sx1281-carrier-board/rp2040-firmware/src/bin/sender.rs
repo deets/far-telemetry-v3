@@ -15,12 +15,13 @@ use lora_phy::iv::GenericSx128xInterfaceVariant;
 use lora_phy::sx128x::{Sx1281, Sx128x,};
 use lora_phy::LoRa;
 use lora_phy::{mod_params::*, sx128x};
+use rf_range_test::receiver_task;
 use {defmt_rtt as _, panic_probe as _};
 
 const LORA_FREQUENCY_IN_HZ: u32 = 2_450_000_000; // warning: set this appropriately for the region
 
 #[embassy_executor::main]
-async fn main(_spawner: Spawner) {
+async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
     let lora1_nss = Output::new(p.PIN_5.degrade(), Level::High);
@@ -56,11 +57,45 @@ async fn main(_spawner: Spawner) {
     let lora1 = LoRa::new(Sx128x::new(lora1_spi, lora1_iv, lora1_config), false, Delay)
         .await
         .unwrap();
-    info!("Created lora");
-    sender_task(lora1).await;
+    info!("Created lora1");
+    spawner.spawn(sender_task(lora1)).expect("Can't spawn sender task");
+
+    let lora2_nss = Output::new(p.PIN_13.degrade(), Level::High);
+    let lora2_busy = Input::new(p.PIN_17.degrade(), Pull::None);
+    let lora2_reset = Output::new(p.PIN_18.degrade(), Level::High);
+    let lora2_irq = Input::new(p.PIN_16.degrade(), Pull::None);
+    let lora2_rx_en = Output::new(p.PIN_15.degrade(), Level::Low);
+    let lora2_tx_en = Output::new(p.PIN_19.degrade(), Level::Low);
+
+    
+    let lora2_spi = Spi::new(
+        p.SPI1,
+        p.PIN_14,
+        p.PIN_11,
+        p.PIN_12,
+        p.DMA_CH2,
+        p.DMA_CH3,
+        Config::default(),
+    );
+
+    let lora2_spi = ExclusiveDevice::new(lora2_spi, lora2_nss, Delay);
+    let lora2_config = sx128x::Config {
+        chip: Sx1281,
+        tcxo_used: true,
+        tx_boost: true,
+        rx_boost: true,
+    };
+    let lora2_iv = GenericSx128xInterfaceVariant::new(lora2_reset, lora2_irq, lora2_busy, Some(lora2_rx_en), Some(lora2_tx_en)).unwrap();
+    info!("Created GenericSx128xInterfaceVariant");
+    
+    let lora2 = LoRa::new(Sx128x::new(lora2_spi, lora2_iv, lora2_config), false, Delay)
+        .await
+        .unwrap();
+    spawner.spawn(receiver_task(lora2)).expect("Can't spawn receiver task");
 }
 
-async fn sender_task(mut lora1: LoRa<Sx128x<ExclusiveDevice<Spi<'_, SPI0, Async>, Output<'_>, Delay>, GenericSx128xInterfaceVariant<Output<'_>, Input<'_>>, Sx1281>, Delay>) {
+ #[embassy_executor::task]
+async fn sender_task(mut lora1: LoRa<Sx128x<ExclusiveDevice<Spi<'static, SPI0, Async>, Output<'static>, Delay>, GenericSx128xInterfaceVariant<Output<'static>, Input<'static>>, Sx1281>, Delay>) {
     let mdltn_params = {
         match lora1.create_modulation_params(
             SpreadingFactor::_12,
