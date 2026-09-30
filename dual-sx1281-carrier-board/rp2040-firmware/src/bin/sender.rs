@@ -7,7 +7,8 @@
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_rp::gpio::{Input, Level, Output, Pin, Pull};
-use embassy_rp::spi::{Config, Spi};
+use embassy_rp::peripherals::SPI0;
+use embassy_rp::spi::{Async, Config, Spi};
 use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use lora_phy::iv::GenericSx128xInterfaceVariant;
@@ -22,15 +23,15 @@ const LORA_FREQUENCY_IN_HZ: u32 = 2_450_000_000; // warning: set this appropriat
 async fn main(_spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
-    let nss = Output::new(p.PIN_5.degrade(), Level::High);
-    let busy = Input::new(p.PIN_7.degrade(), Pull::None);
-    let reset = Output::new(p.PIN_8.degrade(), Level::High);
-    let irq = Input::new(p.PIN_6.degrade(), Pull::None);
-    let rx_en = Output::new(p.PIN_10.degrade(), Level::Low);
-    let tx_en = Output::new(p.PIN_9.degrade(), Level::Low);
+    let lora1_nss = Output::new(p.PIN_5.degrade(), Level::High);
+    let lora1_busy = Input::new(p.PIN_7.degrade(), Pull::None);
+    let lora1_reset = Output::new(p.PIN_8.degrade(), Level::High);
+    let lora1_irq = Input::new(p.PIN_6.degrade(), Pull::None);
+    let lora1_rx_en = Output::new(p.PIN_10.degrade(), Level::Low);
+    let lora1_tx_en = Output::new(p.PIN_9.degrade(), Level::Low);
 
     
-    let spi = Spi::new(
+    let lora1_spi = Spi::new(
         p.SPI0,
         p.PIN_2,
         p.PIN_3,
@@ -41,23 +42,27 @@ async fn main(_spawner: Spawner) {
     );
 
     
-    let spi = ExclusiveDevice::new(spi, nss, Delay);
+    let lora1_spi = ExclusiveDevice::new(lora1_spi, lora1_nss, Delay);
     info!("running");    
-    let config = sx128x::Config {
+    let lora1_config = sx128x::Config {
         chip: Sx1281,
         tcxo_used: true,
         tx_boost: true,
         rx_boost: false,
     };
-    let iv = GenericSx128xInterfaceVariant::new(reset, irq, busy, Some(rx_en), Some(tx_en)).unwrap();
+    let lora1_iv = GenericSx128xInterfaceVariant::new(lora1_reset, lora1_irq, lora1_busy, Some(lora1_rx_en), Some(lora1_tx_en)).unwrap();
     info!("Created GenericSx128xInterfaceVariant");
     
-    let mut lora = LoRa::new(Sx128x::new(spi, iv, config), false, Delay)
+    let lora1 = LoRa::new(Sx128x::new(lora1_spi, lora1_iv, lora1_config), false, Delay)
         .await
         .unwrap();
     info!("Created lora");
+    sender_task(lora1).await;
+}
+
+async fn sender_task(mut lora1: LoRa<Sx128x<ExclusiveDevice<Spi<'_, SPI0, Async>, Output<'_>, Delay>, GenericSx128xInterfaceVariant<Output<'_>, Input<'_>>, Sx1281>, Delay>) {
     let mdltn_params = {
-        match lora.create_modulation_params(
+        match lora1.create_modulation_params(
             SpreadingFactor::_12,
             Bandwidth::_400KHz,
             CodingRate::_4_7,
@@ -72,7 +77,7 @@ async fn main(_spawner: Spawner) {
     };
     info!("modulation params set");
     let mut tx_pkt_params = {
-        match lora.create_tx_packet_params(4, false, true, false, &mdltn_params) {
+        match lora1.create_tx_packet_params(4, false, true, false, &mdltn_params) {
             Ok(pp) => pp,
             Err(err) => {
                 info!("Radio error = {}", err);
@@ -89,7 +94,7 @@ async fn main(_spawner: Spawner) {
             *b = packet_count as u8;
         }
         packet_count += 1;
-        match lora
+        match lora1
             .prepare_for_tx(&mdltn_params, &mut tx_pkt_params, 10, &buffer)
             .await
         {
@@ -100,7 +105,7 @@ async fn main(_spawner: Spawner) {
             }
         };
         info!("transmit");
-        match lora.tx().await {
+        match lora1.tx().await {
             Ok(()) => {
                 info!("TX DONE");
             }
@@ -110,7 +115,7 @@ async fn main(_spawner: Spawner) {
             }
         };
 
-        match lora.sleep(false).await {
+        match lora1.sleep(false).await {
             Ok(()) => info!("Sleep successful"),
             Err(err) => info!("Sleep unsuccessful = {}", err),
         }
