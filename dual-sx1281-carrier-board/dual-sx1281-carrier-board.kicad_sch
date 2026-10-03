@@ -2245,6 +2245,105 @@
 			)
 			(embedded_fonts no)
 		)
+		(symbol "Mechanical:MountingHole"
+			(pin_names
+				(offset 1.016)
+			)
+			(exclude_from_sim no)
+			(in_bom no)
+			(on_board yes)
+			(in_pos_files yes)
+			(duplicate_pin_numbers_are_jumpers no)
+			(property "Reference" "H"
+				(at 0 5.08 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Value" "MountingHole"
+				(at 0 3.175 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Footprint" ""
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Datasheet" ""
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Description" "Mounting Hole without connection"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "ki_keywords" "mounting hole"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "ki_fp_filters" "MountingHole*"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(symbol "MountingHole_0_1"
+				(circle
+					(center 0 0)
+					(radius 1.27)
+					(stroke
+						(width 1.27)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+			)
+			(embedded_fonts no)
+		)
 		(symbol "Memory_Flash:W25Q32JVSS"
 			(exclude_from_sim no)
 			(in_bom yes)
@@ -3384,6 +3483,18 @@
 		)
 		(uuid "204b4662-7bee-429a-8fe4-48bdfa97ad28")
 	)
+	(rectangle
+		(start 15.24 91.44)
+		(end 43.18 124.46)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(fill
+			(type none)
+		)
+		(uuid "4a25aea3-32b2-4048-a55a-06959fcc1685")
+	)
 	(text "Castellations\n"
 		(exclude_from_sim no)
 		(at 28.448 25.654 0)
@@ -3665,12 +3776,24 @@
 		(uuid "fbb10bfb-a659-4276-abdc-2dc8abdb9e40")
 	)
 	(no_connect
-		(at 179.07 71.12)
-		(uuid "5e1fa65b-7107-4248-9767-a84242258b5c")
+		(at 179.07 127)
+		(uuid "34ebf67c-b1fd-4116-a3f9-50e48b4b21d6")
 	)
 	(no_connect
-		(at 179.07 68.58)
-		(uuid "63b1ce74-c3c6-40c9-bdb6-5e0efaa69a5e")
+		(at 179.07 132.08)
+		(uuid "4182bb5a-239e-45d3-aa7f-5df349efd729")
+	)
+	(no_connect
+		(at 179.07 129.54)
+		(uuid "41cdb25c-4b5b-487a-9d07-487e3123da09")
+	)
+	(no_connect
+		(at 179.07 116.84)
+		(uuid "5752f17e-602b-48c0-a696-9c4f3963f2c4")
+	)
+	(no_connect
+		(at 179.07 119.38)
+		(uuid "631223f7-4152-483c-8df5-83a5e47ba8cb")
 	)
 	(no_connect
 		(at 128.27 83.82)
@@ -3685,48 +3808,36 @@
 		(uuid "753ee159-18fe-4b86-ba43-6fd0d1368972")
 	)
 	(no_connect
-		(at 179.07 81.28)
-		(uuid "8063e61c-934c-4757-825b-d5172f9825b7")
+		(at 179.07 121.92)
+		(uuid "7b44cc3a-8919-45fd-8a01-f2080b28b974")
 	)
 	(no_connect
 		(at 128.27 81.28)
 		(uuid "83bbe1b9-bbc6-4d7a-b9f0-e96a23ef9371")
 	)
 	(no_connect
-		(at 179.07 63.5)
-		(uuid "88c09c08-1e28-4743-8bbe-c662a344c13a")
+		(at 179.07 109.22)
+		(uuid "a2c16dbb-aad7-44f7-881b-e3b0b9ae807a")
 	)
 	(no_connect
 		(at 179.07 134.62)
 		(uuid "b901f318-3d7e-47d8-a5c9-436f670b574e")
 	)
 	(no_connect
-		(at 179.07 78.74)
-		(uuid "ba133c53-d18a-47c4-b343-7bc2af594430")
-	)
-	(no_connect
-		(at 179.07 66.04)
-		(uuid "c91783f7-68a1-45fa-b8f6-9aa1db8abc28")
-	)
-	(no_connect
 		(at 259.08 60.96)
 		(uuid "e58ae68d-6024-4088-99c0-0191bcbb057e")
 	)
 	(no_connect
-		(at 179.07 76.2)
-		(uuid "e64907ad-1b32-436b-93b6-0e7f37401adc")
-	)
-	(no_connect
-		(at 179.07 83.82)
-		(uuid "eed0c8e2-7670-4a40-b3d2-e229558e548f")
+		(at 179.07 111.76)
+		(uuid "efba4b2e-deff-42d6-b316-04fd6fa4b60b")
 	)
 	(no_connect
 		(at 259.08 106.68)
 		(uuid "f934fa76-ebb7-466e-88e2-e424a7540a04")
 	)
 	(no_connect
-		(at 179.07 73.66)
-		(uuid "fdccf5dd-4015-465a-8f7d-5442a3f9f26d")
+		(at 179.07 114.3)
+		(uuid "fec58cec-1247-43d9-9af1-399b7f5e3d8e")
 	)
 	(wire
 		(pts
@@ -4519,7 +4630,7 @@
 		(uuid "fe6758f4-cd23-465d-a6f0-7c32de82e473")
 	)
 	(label "LORA1_RX_EN"
-		(at 179.07 132.08 0)
+		(at 179.07 83.82 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4538,6 +4649,16 @@
 		)
 		(uuid "03ec29b9-7500-4be0-99ca-2ec892b85a39")
 	)
+	(label "SWCLK"
+		(at 119.38 129.54 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "117882f7-241e-4ebf-b358-8172d05a2727")
+	)
 	(label "SPI1 CS"
 		(at 179.07 91.44 0)
 		(effects
@@ -4549,7 +4670,7 @@
 		(uuid "1250896c-dca6-46eb-b238-ee03e2be77b1")
 	)
 	(label "LORA1 IRQ"
-		(at 179.07 119.38 0)
+		(at 179.07 73.66 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4559,7 +4680,7 @@
 		(uuid "18e7a622-017a-4e73-abaf-f1971ac980a2")
 	)
 	(label "SPI0 TX"
-		(at 179.07 116.84 0)
+		(at 179.07 66.04 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4569,7 +4690,7 @@
 		(uuid "1ed8c84d-7f2e-4a61-91a8-b6d614936960")
 	)
 	(label "LORA1 NRST"
-		(at 179.07 127 0)
+		(at 179.07 78.74 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4577,6 +4698,16 @@
 			(justify left bottom)
 		)
 		(uuid "2542d399-d1ad-4849-82d3-49ed8fc4d25e")
+	)
+	(label "RUN"
+		(at 115.57 73.66 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "26855cc1-d403-4806-87f9-8c663d4a0c08")
 	)
 	(label "SPI1 CLK"
 		(at 233.68 111.76 180)
@@ -4619,7 +4750,7 @@
 		(uuid "435bfaeb-381a-4681-a0e1-d8202c45c7be")
 	)
 	(label "LORA1 BUSY"
-		(at 179.07 121.92 0)
+		(at 179.07 76.2 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4669,7 +4800,7 @@
 		(uuid "6d1991fe-f38a-4ebc-9daa-6307ae97d7ec")
 	)
 	(label "SPI0 RX"
-		(at 179.07 109.22 0)
+		(at 179.07 68.58 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4677,6 +4808,16 @@
 			(justify left bottom)
 		)
 		(uuid "6e232250-aa1b-4990-88f4-445de10377c1")
+	)
+	(label "SWDIO"
+		(at 119.38 132.08 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "6e34e40f-f353-4c78-aafe-15314fad7cb6")
 	)
 	(label "LORA2 IRQ"
 		(at 259.08 111.76 0)
@@ -4709,7 +4850,7 @@
 		(uuid "7f000394-4949-408c-8823-e60658672ba6")
 	)
 	(label "SPI0 SCK"
-		(at 179.07 114.3 0)
+		(at 179.07 63.5 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4757,6 +4898,16 @@
 			(justify left bottom)
 		)
 		(uuid "8c36179c-3306-4254-bb71-e6aebb9167c7")
+	)
+	(label "XGND"
+		(at 139.7 191.77 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "8c84d739-bc25-4595-9aea-a175e5aae888")
 	)
 	(label "LORA1_RX_EN"
 		(at 233.68 68.58 180)
@@ -4829,7 +4980,7 @@
 		(uuid "b59b2bb9-fcd0-4563-a450-aae101035820")
 	)
 	(label "LORA1_TX_EN"
-		(at 179.07 129.54 0)
+		(at 179.07 81.28 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4949,7 +5100,7 @@
 		(uuid "f13495af-5b3a-4ff7-a2b9-a8d05112d1e5")
 	)
 	(label "SPI0 CS"
-		(at 179.07 111.76 0)
+		(at 179.07 71.12 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5488,7 +5639,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Resistor_SMD:R_0201_0603Metric"
+		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
 			(at 113.792 62.23 90)
 			(hide yes)
 			(show_name no)
@@ -5646,7 +5797,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Resistor_SMD:R_0201_0603Metric"
+		(property "Footprint" "Resistor_SMD:R_0402_1005Metric"
 			(at 139.7 174.498 90)
 			(hide yes)
 			(show_name no)
@@ -5884,7 +6035,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Resistor_SMD:R_0201_0603Metric"
+		(property "Footprint" "Resistor_SMD:R_0402_1005Metric"
 			(at 148.082 180.34 90)
 			(hide yes)
 			(show_name no)
@@ -6534,6 +6685,82 @@
 		)
 	)
 	(symbol
+		(lib_id "Mechanical:MountingHole")
+		(at 22.86 96.52 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom no)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "670754b3-1df6-4d58-9c4c-1b8df0f6671d")
+		(property "Reference" "H1"
+			(at 25.4 95.2499 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "MountingHole"
+			(at 25.4 97.7899 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "MountingHole:MountingHole_2mm"
+			(at 22.86 96.52 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 22.86 96.52 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Mounting Hole without connection"
+			(at 22.86 96.52 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(instances
+			(project "dual-sx1281-carrier-board"
+				(path "/dd3d82ed-b0ea-48bf-93b4-f28bcc2a961e"
+					(reference "H1")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "Device:C")
 		(at 76.2 184.15 0)
 		(unit 1)
@@ -6788,13 +7015,14 @@
 		(fields_autoplaced yes)
 		(uuid "77606865-9fcd-4d07-add3-79694baf1af7")
 		(property "Reference" "U3"
-			(at 246.38 53.34 0)
+			(at 248.5233 50.8 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
+				(justify left)
 			)
 		)
 		(property "Value" "E28-2G4M20SX"
@@ -6830,14 +7058,15 @@
 				)
 			)
 		)
-		(property "Description" "Lora2"
-			(at 246.38 66.04 0)
+		(property "Description" "Lora1"
+			(at 248.5233 53.34 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
+				(justify left)
 			)
 		)
 		(property "Manufacturer" "SenseCAP"
@@ -7233,6 +7462,82 @@
 		)
 	)
 	(symbol
+		(lib_id "Mechanical:MountingHole")
+		(at 22.86 106.68 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom no)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "7d65d555-4fb2-4c1c-aaea-982d604d086c")
+		(property "Reference" "H3"
+			(at 25.4 105.4099 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "MountingHole"
+			(at 25.4 107.9499 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "MountingHole:MountingHole_2mm"
+			(at 22.86 106.68 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 22.86 106.68 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Mounting Hole without connection"
+			(at 22.86 106.68 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(instances
+			(project "dual-sx1281-carrier-board"
+				(path "/dd3d82ed-b0ea-48bf-93b4-f28bcc2a961e"
+					(reference "H3")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "power:+3V3")
 		(at 151.13 34.29 0)
 		(unit 1)
@@ -7475,6 +7780,82 @@
 		)
 	)
 	(symbol
+		(lib_id "Mechanical:MountingHole")
+		(at 22.86 111.76 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom no)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "874226d0-7a02-4096-9823-75e646e002f7")
+		(property "Reference" "H4"
+			(at 25.4 110.4899 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "MountingHole"
+			(at 25.4 113.0299 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "MountingHole:MountingHole_2mm"
+			(at 22.86 111.76 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 22.86 111.76 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Mounting Hole without connection"
+			(at 22.86 111.76 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(instances
+			(project "dual-sx1281-carrier-board"
+				(path "/dd3d82ed-b0ea-48bf-93b4-f28bcc2a961e"
+					(reference "H4")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "Device:Crystal_GND24")
 		(at 139.7 184.15 0)
 		(unit 1)
@@ -7594,7 +7975,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Resistor_SMD:R_0201_0603Metric"
+		(property "Footprint" "Resistor_SMD:R_0402_1005Metric"
 			(at 118.872 87.63 90)
 			(hide yes)
 			(show_name no)
@@ -9459,6 +9840,82 @@
 			(project "dual-sx1281-carrier-board"
 				(path "/dd3d82ed-b0ea-48bf-93b4-f28bcc2a961e"
 					(reference "#FLG01")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Mechanical:MountingHole")
+		(at 22.86 101.6 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom no)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "e9756eb1-1fbf-42db-a44a-29b572256089")
+		(property "Reference" "H2"
+			(at 25.4 100.3299 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "MountingHole"
+			(at 25.4 102.8699 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "MountingHole:MountingHole_2mm"
+			(at 22.86 101.6 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 22.86 101.6 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Mounting Hole without connection"
+			(at 22.86 101.6 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(instances
+			(project "dual-sx1281-carrier-board"
+				(path "/dd3d82ed-b0ea-48bf-93b4-f28bcc2a961e"
+					(reference "H2")
 					(unit 1)
 				)
 			)
