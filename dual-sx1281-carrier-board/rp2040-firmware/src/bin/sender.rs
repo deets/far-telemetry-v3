@@ -6,17 +6,27 @@
 
 use defmt::*;
 use embassy_executor::Spawner;
+use embassy_rp::bind_interrupts;
 use embassy_rp::gpio::{Input, Level, Output, Pin, Pull};
-use embassy_rp::peripherals::SPI0;
+use embassy_rp::peripherals::{SPI0, UART0};
 use embassy_rp::spi::{Async, Config, Spi};
+use embassy_rp::uart::{InterruptHandler, Uart, Config as UartConfig};
 use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use lora_phy::iv::GenericSx128xInterfaceVariant;
 use lora_phy::sx128x::{Sx1281, Sx128x,};
 use lora_phy::LoRa;
 use lora_phy::{mod_params::*, sx128x};
+use rf_range_test::host_interface::uart_task;
 use rf_range_test::receiver_task;
+use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
+
+
+bind_interrupts!(struct Irqs {
+    UART0_IRQ => InterruptHandler<UART0>;
+});
+
 
 const LORA_FREQUENCY_IN_HZ: u32 = 2_450_000_000; // warning: set this appropriately for the region
 
@@ -31,6 +41,13 @@ async fn main(spawner: Spawner) {
     let lora1_rx_en = Output::new(p.PIN_10.degrade(), Level::Low);
     let lora1_tx_en = Output::new(p.PIN_9.degrade(), Level::Low);
 
+    static TX_BUF: StaticCell<[u8; 16]> = StaticCell::new();
+    let tx_buf = &mut TX_BUF.init([0; 16])[..];
+    static RX_BUF: StaticCell<[u8; 16]> = StaticCell::new();
+    let rx_buf = &mut RX_BUF.init([0; 16])[..];
+
+    let (tx_pin, rx_pin, uart) = (p.PIN_0, p.PIN_1, p.UART0);
+    let uart = Uart::new(uart, tx_pin, rx_pin, Irqs, p.DMA_CH4, p.DMA_CH5, UartConfig::default());
     
     let lora1_spi = Spi::new(
         p.SPI0,
@@ -92,6 +109,7 @@ async fn main(spawner: Spawner) {
         .await
         .unwrap();
     spawner.spawn(receiver_task(lora2)).expect("Can't spawn receiver task");
+    uart_task(uart).await;
 }
 
  #[embassy_executor::task]

@@ -11,6 +11,8 @@ use lora_phy::{LoRa};
 use lora_phy::{mod_params::*};
 use {defmt_rtt as _, panic_probe as _};
 
+pub mod host_interface;
+
 const LORA_FREQUENCY_IN_HZ: u32 = 2_450_000_000; // warning: set this appropriately for the region
 
  #[embassy_executor::task]
