@@ -1,3 +1,9 @@
+[workspace]
+members = [
+    ".",
+    "rq2-telemetry-parser",
+]
+
 [package]
 edition = "2021"
 name = "rf-range-test"
@@ -16,7 +22,7 @@ embassy-net = { version = "0.7.0", features = ["defmt", "icmp", "tcp", "udp", "r
 embassy-net-wiznet = { version = "0.2.0", features = ["defmt"] }
 embassy-futures = { version = "0.1.0" }
 cyw43-pio = { version = "0.4.0", features = ["defmt"] }
-
+rq2-telemetry-parser = { path = "./rq2-telemetry-parser" }
 lora-phy = { path = "./modules/lora-rs/lora-phy", version = "3.0.2-alpha", features = ["lorawan-radio", "defmt-03"] }
 lorawan-device = { path = "./modules/lora-rs/lorawan-device", version = "0.12.2", features = ["region-eu433", "defmt-03"] }
 

@@ -19,7 +19,6 @@ use lora_phy::LoRa;
 use lora_phy::{mod_params::*, sx128x};
 use rf_range_test::host_interface::uart_task;
 use rf_range_test::receiver_task;
-use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
 
@@ -40,11 +39,6 @@ async fn main(spawner: Spawner) {
     let lora1_irq = Input::new(p.PIN_6.degrade(), Pull::None);
     let lora1_rx_en = Output::new(p.PIN_10.degrade(), Level::Low);
     let lora1_tx_en = Output::new(p.PIN_9.degrade(), Level::Low);
-
-    static TX_BUF: StaticCell<[u8; 16]> = StaticCell::new();
-    let tx_buf = &mut TX_BUF.init([0; 16])[..];
-    static RX_BUF: StaticCell<[u8; 16]> = StaticCell::new();
-    let rx_buf = &mut RX_BUF.init([0; 16])[..];
 
     let (tx_pin, rx_pin, uart) = (p.PIN_0, p.PIN_1, p.UART0);
     let uart = Uart::new(uart, tx_pin, rx_pin, Irqs, p.DMA_CH4, p.DMA_CH5, UartConfig::default());

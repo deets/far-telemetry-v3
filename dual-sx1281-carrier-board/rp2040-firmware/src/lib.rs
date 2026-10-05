@@ -1,12 +1,12 @@
 #![no_std]
 use defmt::*;
-use embassy_rp::gpio::{Input, Level, Output, Pin, Pull};
+use embassy_rp::gpio::{Input, Output,};
 use embassy_rp::peripherals::SPI1;
-use embassy_rp::spi::{Async, Config, Spi};
-use embassy_time::{Delay, Timer};
+use embassy_rp::spi::{Async, Spi};
+use embassy_time::Delay;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use lora_phy::iv::{GenericSx128xInterfaceVariant};
-use lora_phy::sx128x::{self, Sx128x, Sx1281};
+use lora_phy::sx128x::{Sx128x, Sx1281};
 use lora_phy::{LoRa};
 use lora_phy::{mod_params::*};
 use {defmt_rtt as _, panic_probe as _};
