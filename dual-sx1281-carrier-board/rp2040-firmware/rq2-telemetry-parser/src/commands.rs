@@ -1,6 +1,5 @@
 use crate::Read;
 use crate::Write;
-use core::ops::Deref;
 use heapless::Vec;
 use postcard::{from_bytes, to_vec};
 use serde::{Deserialize, Serialize};

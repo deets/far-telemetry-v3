@@ -1,3 +1,8 @@
+#[cfg(test)]
+extern crate std;
+
+use num_integer::Integer;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FrameResult<'a> {
     Nothing,
@@ -96,9 +101,116 @@ impl FrameProcessor for SelfContainedFrameParser {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SevenBitTranscoderError {
+    BufferOverflow,
+}
+/// Our framing forbids the MSB to be set.  To accomodate this, I'm
+/// encoding bytes as 7-bit values that are shifted to create full 8
+/// bit bytes. This struct helps accomplishing this from both sides.
+#[derive(Debug)]
+pub struct SevenBitTranscoder<'a> {
+    buffer: &'a mut [u8],
+}
+
+impl<'a> SevenBitTranscoder<'a> {
+    fn new(buffer: &'a mut [u8]) -> SevenBitTranscoder<'a> {
+        Self { buffer }
+    }
+
+    /// Encode a buffer of 8 bit bytes into a buffer that
+    /// guarantees the MSB is always 0, and the bits are
+    /// send as a otherwise consecutive stream.
+    fn encode(&mut self, incoming: &[u8]) -> Result<&[u8], SevenBitTranscoderError> {
+        let (mut byte_count, rest_bits) = (incoming.len() * 8).div_rem(&7_usize);
+        if rest_bits > 0 {
+            byte_count += 1;
+        }
+        if byte_count > self.buffer.len() {
+            return Err(SevenBitTranscoderError::BufferOverflow);
+        }
+        // This is a rather stupid implementation, as it accesses
+        // every byte usually twice, instead of using a buffer and
+        // shifting bits in and out - but I've wasted a bit of time
+        // on that, and correctness trumps speed for now.
+        for i in 0..byte_count {
+            let bit_index_start = i * 7;
+            let bit_index_end = bit_index_start + 7;
+            let byte_index_start = bit_index_start >> 3;
+            let byte_index_end = bit_index_end >> 3;
+
+            // We are fully within one bytes
+            let value = if byte_index_start == byte_index_end {
+                (incoming[byte_index_start] >> 1) & 0x7F
+            } else {
+                let upper = (incoming[byte_index_start] << (7 - i)) & 0x7F;
+                // it's possible to point beyond the last byte, then fill with zero
+                let lower = if byte_index_end < incoming.len() {
+                    incoming[byte_index_end] >> (i + 1)
+                } else {
+                    0
+                };
+                upper | lower
+            };
+            self.buffer[i] = value;
+        }
+        Ok(&self.buffer[0..byte_count])
+    }
+
+    /// Decode a buffer with 7-bit bytes into the full 8-bit equivalent.
+    fn decode(&mut self, incoming: &[u8]) -> Result<&'a [u8], SevenBitTranscoderError> {
+        // let count = incoming.len() * 7 / 8;
+        // // A special case that could be considered verboten: encoding
+        // // one byte into a 7-bit-based buffer *always* needs two
+        // // bytes, as you don't know if the least significant bit is zero or not.
+        // // However when decoding you can imply that w/o a byte, it's a zero
+        // if count < 1 {
+        //     self.buffer[0] = incoming[0] << 1;
+        //     return Ok(self.buffer[0..1]);
+        // }
+        todo!();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_one_byte_as_seven_bit_transfer() {
+        let mut buffer = [0; 1024];
+        let mut encoder = SevenBitTranscoder::new(&mut buffer);
+        assert_eq!(encoder.encode(&[0xFF]), Ok([0x7F_u8, 0x40_u8].as_slice()));
+        let mut encoder = SevenBitTranscoder::new(&mut buffer);
+        assert_eq!(encoder.encode(&[0xFE]), Ok([0x7F_u8, 0x00_u8].as_slice()));
+    }
+
+    #[test]
+    fn test_two_byte_as_seven_bit_transfer() {
+        let mut buffer = [0; 1024];
+        let mut encoder = SevenBitTranscoder::new(&mut buffer);
+        assert_eq!(
+            encoder.encode(&[0xFF, 0xFF]),
+            Ok([0x7F_u8, 0x7F_u8, 0x60].as_slice())
+        );
+        assert_eq!(
+            encoder.encode(&[0xFF, 0xFC]),
+            Ok([0x7F_u8, 0x7F_u8, 0x00].as_slice())
+        );
+    }
+
+    #[test]
+    fn test_seven_byte_as_seven_bit_transfer() {
+        let mut buffer = [0; 1024];
+        let mut encoder = SevenBitTranscoder::new(&mut buffer);
+        assert_eq!(
+            encoder.encode(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]),
+            Ok(
+                [0x7F_u8, 0x7F_u8, 0x7F_u8, 0x7F_u8, 0x7F_u8, 0x7F_u8, 0x7F_u8, 0x7F_u8,]
+                    .as_slice()
+            )
+        );
+    }
 
     #[test]
     fn test_simple_frame() {
