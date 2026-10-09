@@ -137,30 +137,26 @@ trait ResponseProcessor {
 }
 
 #[derive(Debug, PartialEq)]
-enum DispatcherError {
+enum DispatcherError<E> {
     FrameError(crate::FrameError),
     SevenBitEncodingError(crate::SevenBitTranscoderError),
     PostcardError(postcard::Error),
+    ResponseError(E),
 }
 
 /// Processing incoming bytes from uart according
 /// to both our framing and 7-bit encoding to
 /// yield Commands (that technically should be responses)
 /// and delegates these for processing.
-struct IncomingDataDispatcher<
-    'a,
-    'b,
-    RP: ResponseProcessor<Error = DispatcherError>,
-    FP: FrameProcessor,
-> {
+struct IncomingDataDispatcher<'a, 'b, E, RP: ResponseProcessor<Error = E>, FP: FrameProcessor> {
     processor: &'a mut RP,
     frame_parser: &'b mut FP,
     working: [u8; 128],
 }
 
-impl<'a, 'b, RP, FP> IncomingDataDispatcher<'a, 'b, RP, FP>
+impl<'a, 'b, E, RP, FP> IncomingDataDispatcher<'a, 'b, E, RP, FP>
 where
-    RP: ResponseProcessor<Error = DispatcherError>,
+    RP: ResponseProcessor<Error = E>,
     FP: FrameProcessor,
 {
     pub fn new(processor: &'a mut RP, frame_parser: &'b mut FP) -> Self {
@@ -171,7 +167,7 @@ where
         }
     }
 
-    pub async fn feed(&mut self, data: u8) -> Result<(), DispatcherError> {
+    pub async fn feed(&mut self, data: u8) -> Result<(), DispatcherError<E>> {
         let frame_result = self.frame_parser.feed(data);
         let mut frame_copy = [0; 128];
         match frame_result {
@@ -186,11 +182,13 @@ where
         Ok(())
     }
 
-    fn process_frame(&mut self, frame: &[u8]) -> Result<(), DispatcherError> {
+    fn process_frame(&mut self, frame: &[u8]) -> Result<(), DispatcherError<E>> {
         let decoded = seven_bit_decode(&mut self.working, frame)
             .map_err(DispatcherError::SevenBitEncodingError)?;
         let command: Command = from_bytes(decoded).map_err(DispatcherError::PostcardError)?;
-        self.processor.process_response(command)
+        self.processor
+            .process_response(command)
+            .map_err(DispatcherError::ResponseError)
     }
 }
 
@@ -202,12 +200,17 @@ mod tests {
     extern crate std;
     extern crate tokio;
 
+    #[derive(Debug, Copy, Clone, PartialEq)]
+    enum TestResponseProcessorError {
+        NothingWorks,
+    }
+
     struct TestResponseProcessor {
         count: usize,
     }
 
     impl ResponseProcessor for TestResponseProcessor {
-        type Error = DispatcherError;
+        type Error = TestResponseProcessorError;
 
         fn process_response<'a>(&mut self, command: Command<'a>) -> Result<(), Self::Error> {
             self.count += 1;
