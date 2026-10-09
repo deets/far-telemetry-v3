@@ -1,4 +1,10 @@
+use crate::seven_bit_decode;
+use crate::FrameParser;
+use crate::FrameProcessor;
+use crate::FrameResult;
+use crate::FrameResult::Nothing;
 use crate::Read;
+use crate::SelfContainedFrameParser;
 use crate::Write;
 use heapless::Vec;
 use postcard::{from_bytes, to_vec};
@@ -124,11 +130,118 @@ impl CommandProcessor {
     }
 }
 
+trait ResponseProcessor {
+    type Error;
+
+    fn process_response<'a>(&mut self, command: Command<'a>) -> Result<(), Self::Error>;
+}
+
+#[derive(Debug, PartialEq)]
+enum DispatcherError {
+    FrameError(crate::FrameError),
+    SevenBitEncodingError(crate::SevenBitTranscoderError),
+    PostcardError(postcard::Error),
+}
+
+/// Processing incoming bytes from uart according
+/// to both our framing and 7-bit encoding to
+/// yield Commands (that technically should be responses)
+/// and delegates these for processing.
+struct IncomingDataDispatcher<
+    'a,
+    'b,
+    RP: ResponseProcessor<Error = DispatcherError>,
+    FP: FrameProcessor,
+> {
+    processor: &'a mut RP,
+    frame_parser: &'b mut FP,
+    working: [u8; 128],
+}
+
+impl<'a, 'b, RP, FP> IncomingDataDispatcher<'a, 'b, RP, FP>
+where
+    RP: ResponseProcessor<Error = DispatcherError>,
+    FP: FrameProcessor,
+{
+    pub fn new(processor: &'a mut RP, frame_parser: &'b mut FP) -> Self {
+        Self {
+            processor,
+            frame_parser,
+            working: [0; 128],
+        }
+    }
+
+    pub async fn feed(&mut self, data: u8) -> Result<(), DispatcherError> {
+        let frame_result = self.frame_parser.feed(data);
+        let mut frame_copy = [0; 128];
+        match frame_result {
+            Ok(FrameResult::Frame(frame)) => {
+                frame_copy[0..frame.len()].copy_from_slice(frame);
+                drop(frame);
+                self.process_frame(&frame_copy)?;
+            }
+            Ok(Nothing) => {}
+            Err(frame_error) => return Err(DispatcherError::FrameError(frame_error)),
+        };
+        Ok(())
+    }
+
+    fn process_frame(&mut self, frame: &[u8]) -> Result<(), DispatcherError> {
+        let decoded = seven_bit_decode(&mut self.working, frame)
+            .map_err(DispatcherError::SevenBitEncodingError)?;
+        let command: Command = from_bytes(decoded).map_err(DispatcherError::PostcardError)?;
+        self.processor.process_response(command)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::encode_frame;
+
     use super::*;
     extern crate std;
     extern crate tokio;
+
+    struct TestResponseProcessor {
+        count: usize,
+    }
+
+    impl ResponseProcessor for TestResponseProcessor {
+        type Error = DispatcherError;
+
+        fn process_response<'a>(&mut self, command: Command<'a>) -> Result<(), Self::Error> {
+            self.count += 1;
+            Ok(())
+        }
+    }
+
+    fn serialize_command<'a>(buffer: &'a mut [u8], command: &Command) -> &'a [u8] {
+        let output: Vec<u8, 256> = to_vec(&command).unwrap();
+        let mut encoded_buffer = [0; 127];
+        let encoded = crate::framing::seven_bit_encode(&mut encoded_buffer, &output)
+            .expect("Can't encode 7-bit");
+        crate::framing::encode_frame(buffer, encoded).expect("Can't generate frame")
+    }
+
+    #[tokio::test]
+    async fn test_incoming_data_dispatch() {
+        let mut processor = TestResponseProcessor { count: 0 };
+        let mut parser = SelfContainedFrameParser::new();
+        let mut dispatcher = IncomingDataDispatcher::new(&mut processor, &mut parser);
+        let response = Command {
+            destination: Module::Lora1,
+            payload: Payload::Response {
+                command_id: 1,
+                response: Response::Ack,
+            },
+        };
+        let mut buffer = [0; 1024];
+        let data = serialize_command(&mut buffer, &response);
+        for c in data {
+            dispatcher.feed(*c).await.expect("Can't dispatch command");
+        }
+        assert_eq!(processor.count, 1);
+    }
 
     #[test]
     fn test_serialization() {
