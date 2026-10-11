@@ -11,14 +11,14 @@ use postcard::{from_bytes, to_vec};
 use serde::{Deserialize, Serialize};
 use Error::SerializationError;
 
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
 pub enum Mode {
     Idle,
     Tx,
     RxContinuous,
 }
 
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
 pub enum Bandwidth {
     _200KHz,
     _400KHz,
@@ -26,7 +26,7 @@ pub enum Bandwidth {
     _1600KHz,
 }
 
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
 pub enum SpreadingFactor {
     _6,
     _7,
@@ -37,7 +37,7 @@ pub enum SpreadingFactor {
     _12,
 }
 
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
 pub enum CodingRate {
     _4_5,
     _4_6,
@@ -45,7 +45,7 @@ pub enum CodingRate {
     _4_8,
 }
 
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
 pub enum Module {
     Lora1,
     Lora2,
@@ -67,7 +67,7 @@ pub enum Payload<'a> {
     Response { command_id: u8, response: Response },
 }
 
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
 pub enum Request {
     /// Ask for the current mode we're in
     Status,
@@ -82,21 +82,22 @@ pub enum Request {
     },
 }
 
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
 pub enum Response {
     Ack,
     /// Report the current mode we are in
     Status(Mode),
 }
 
-struct CommandProcessor {
-    command_id: u8,
-}
-
 #[derive(Debug, Eq, PartialEq)]
 pub enum Error {
-    SomethingWentWrong,
+    Timeout,
     SerializationError(postcard::Error),
+    UnexpectedCommandId(u8),
+    NotAResponse,
+    NoResponseExpected,
+    WrongDestination,
+    UnexpectedResponse,
 }
 
 impl From<postcard::Error> for Error {
@@ -105,9 +106,55 @@ impl From<postcard::Error> for Error {
     }
 }
 
+trait ResponseProcessor {
+    type Error;
+
+    fn process_response<'a>(&mut self, command: Command<'a>) -> Result<Response, Self::Error>;
+}
+
+/// The communication model to the telemetry
+/// module has three key properties the CommandProcessor is
+/// designed to uphold:
+///
+///  - At any time a payload can come through, which must be passed on to
+///    the rest of the application.
+///  - There is always only ever *one* control command
+///    in flight for which usually an answer is expected.
+///  - A timeout can occur and means an error state for
+///    which higher levels are responsible, it's not the job
+///    of CommandProcessor to deal with this e.g. by retries.
+struct CommandProcessor {
+    command_id: u8,
+    expected: Option<Expectation>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+enum ResponseKind {
+    Status,
+    Configure,
+}
+
+impl From<Request> for ResponseKind {
+    fn from(value: Request) -> Self {
+        match value {
+            Request::Status => ResponseKind::Status,
+            Request::Configure { .. } => ResponseKind::Configure,
+        }
+    }
+}
+
+struct Expectation {
+    command_id: u8,
+    destination: Module,
+    response_kind: ResponseKind,
+}
+
 impl CommandProcessor {
     fn new() -> Self {
-        Self { command_id: 0 }
+        Self {
+            command_id: 0,
+            expected: None,
+        }
     }
 
     fn next_command_id(&mut self) -> u8 {
@@ -116,24 +163,84 @@ impl CommandProcessor {
         res
     }
 
-    async fn send_sync(
+    async fn send(
         &mut self,
+        destination: Module,
         request: Request,
         writer: &mut impl Write<Error = Error>,
-        reader: &mut impl Read<Error = Error>,
-    ) -> Result<Response, Error> {
-        let mut buffer: Vec<u8, 128> = to_vec(&request)?;
-        writer.write(&buffer).await?;
-        let bytes_read = reader.read_all(&mut buffer).await?;
-        let res: Response = from_bytes(&buffer)?;
-        Ok(res)
+    ) -> Result<(), Error> {
+        let command_id = self.next_command_id();
+        self.expected = Some(Expectation {
+            command_id,
+            destination,
+            response_kind: request.into(),
+        });
+
+        let command = Command {
+            destination,
+            payload: Payload::Request {
+                command_id,
+                request,
+            },
+        };
+        let mut buffer: Vec<u8, 128> = to_vec(&command)?;
+        writer.write(&buffer).await
     }
 }
 
-trait ResponseProcessor {
-    type Error;
+impl ResponseProcessor for CommandProcessor {
+    type Error = Error;
 
-    fn process_response<'a>(&mut self, command: Command<'a>) -> Result<(), Self::Error>;
+    fn process_response<'a>(&mut self, command: Command<'a>) -> Result<Response, Self::Error> {
+        match command.payload {
+            Payload::Data(items) => todo!(),
+            Payload::Request {
+                command_id,
+                request,
+            } => Err(Error::NotAResponse),
+            Payload::Response {
+                command_id,
+                response,
+            } => {
+                if let Some(expectation) = &self.expected {
+                    expectation.validate_response_matches_expectation(
+                        command.destination,
+                        command_id,
+                        response,
+                    )?;
+                    self.expected = None;
+                    Ok(response)
+                } else {
+                    Err(Error::NoResponseExpected)
+                }
+            }
+        }
+    }
+}
+
+impl Expectation {
+    fn validate_response_matches_expectation(
+        &self,
+        destination: Module,
+        command_id: u8,
+        response: Response,
+    ) -> Result<(), Error> {
+        if self.command_id != command_id {
+            return Err(Error::UnexpectedCommandId(command_id));
+        }
+        if self.destination != destination {
+            return Err(Error::WrongDestination);
+        }
+        if match (self.response_kind, response) {
+            (ResponseKind::Status, Response::Status(_)) => true,
+            (ResponseKind::Configure, Response::Ack) => true,
+            _ => false,
+        } {
+            Ok(())
+        } else {
+            Err(Error::UnexpectedResponse)
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -146,8 +253,7 @@ enum DispatcherError<E> {
 
 /// Processing incoming bytes from uart according
 /// to both our framing and 7-bit encoding to
-/// yield Commands (that technically should be responses)
-/// and delegates these for processing.
+/// yield Responses.
 struct IncomingDataDispatcher<'a, 'b, E, RP: ResponseProcessor<Error = E>, FP: FrameProcessor> {
     processor: &'a mut RP,
     frame_parser: &'b mut FP,
@@ -182,7 +288,7 @@ where
         Ok(())
     }
 
-    fn process_frame(&mut self, frame: &[u8]) -> Result<(), DispatcherError<E>> {
+    fn process_frame(&mut self, frame: &[u8]) -> Result<Response, DispatcherError<E>> {
         let decoded = seven_bit_decode(&mut self.working, frame)
             .map_err(DispatcherError::SevenBitEncodingError)?;
         let command: Command = from_bytes(decoded).map_err(DispatcherError::PostcardError)?;
@@ -212,9 +318,22 @@ mod tests {
     impl ResponseProcessor for TestResponseProcessor {
         type Error = TestResponseProcessorError;
 
-        fn process_response<'a>(&mut self, command: Command<'a>) -> Result<(), Self::Error> {
-            self.count += 1;
-            Ok(())
+        fn process_response<'a>(&mut self, command: Command<'a>) -> Result<Response, Self::Error> {
+            match command.payload {
+                Payload::Data(items) => todo!(),
+                Payload::Request {
+                    command_id,
+                    request,
+                } => todo!(),
+                Payload::Response {
+                    command_id,
+                    response,
+                } => {
+                    self.count += 1;
+                    return Ok(response);
+                }
+            }
+            Err(TestResponseProcessorError::NothingWorks)
         }
     }
 
@@ -316,7 +435,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn command_processor_send_sync_test() {
+    async fn command_processor_send_test() {
         let mut command_processor = CommandProcessor::new();
         let mut writer = BufferWriter::new();
         let request = Request::Configure {
@@ -328,11 +447,9 @@ mod tests {
         let response = Response::Ack;
         let response: Vec<u8, 256> = to_vec(&response).unwrap();
         let mut reader = BufferReader { buffer: &response };
-        assert_eq!(
-            command_processor
-                .send_sync(request, &mut writer, &mut reader)
-                .await,
-            Ok(Response::Ack)
-        );
+        assert!(command_processor
+            .send(Module::Lora1, request, &mut writer)
+            .await
+            .is_ok());
     }
 }
