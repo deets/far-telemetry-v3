@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use crate::seven_bit_decode;
 use crate::FrameParser;
 use crate::FrameProcessor;
@@ -9,6 +11,7 @@ use crate::Write;
 use heapless::Vec;
 use postcard::{from_bytes, to_vec};
 use serde::{Deserialize, Serialize};
+use Error::DataProcessingError;
 use Error::SerializationError;
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
@@ -90,7 +93,7 @@ pub enum Response {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub enum Error {
+pub enum Error<E> {
     Timeout,
     SerializationError(postcard::Error),
     UnexpectedCommandId(u8),
@@ -98,18 +101,35 @@ pub enum Error {
     NoResponseExpected,
     WrongDestination,
     UnexpectedResponse,
+    DataProcessed,
+    DataProcessingError(E),
 }
 
-impl From<postcard::Error> for Error {
+impl<E> From<postcard::Error> for Error<E> {
     fn from(value: postcard::Error) -> Self {
         SerializationError(value)
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
+enum ResponseProcessorResult {
+    DataProcessd,
+    Response(Response),
+}
+
 trait ResponseProcessor {
     type Error;
 
-    fn process_response<'a>(&mut self, command: Command<'a>) -> Result<Response, Self::Error>;
+    fn process_response<'a>(
+        &mut self,
+        command: Command<'a>,
+    ) -> Result<ResponseProcessorResult, Self::Error>;
+}
+
+trait DataProcessor {
+    type Error;
+
+    fn process_data<'a>(&mut self, source: Module, data: &'a [u8]) -> Result<(), Self::Error>;
 }
 
 /// The communication model to the telemetry
@@ -123,9 +143,10 @@ trait ResponseProcessor {
 ///  - A timeout can occur and means an error state for
 ///    which higher levels are responsible, it's not the job
 ///    of CommandProcessor to deal with this e.g. by retries.
-struct CommandProcessor {
+struct CommandProcessor<'a, E, DP: DataProcessor<Error = E>> {
     command_id: u8,
-    expected: Option<Expectation>,
+    expected: Option<Expectation<E>>,
+    data_processor: &'a mut DP,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -143,17 +164,19 @@ impl From<Request> for ResponseKind {
     }
 }
 
-struct Expectation {
+struct Expectation<E> {
     command_id: u8,
     destination: Module,
     response_kind: ResponseKind,
+    phantom_data: PhantomData<E>,
 }
 
-impl CommandProcessor {
-    fn new() -> Self {
+impl<'dp, E, DP: DataProcessor<Error = E>> CommandProcessor<'dp, E, DP> {
+    fn new(data_processor: &'dp mut DP) -> Self {
         Self {
             command_id: 0,
             expected: None,
+            data_processor,
         }
     }
 
@@ -167,13 +190,14 @@ impl CommandProcessor {
         &mut self,
         destination: Module,
         request: Request,
-        writer: &mut impl Write<Error = Error>,
-    ) -> Result<(), Error> {
+        writer: &mut impl Write<Error = Error<E>>,
+    ) -> Result<(), Error<E>> {
         let command_id = self.next_command_id();
         self.expected = Some(Expectation {
             command_id,
             destination,
             response_kind: request.into(),
+            phantom_data: PhantomData,
         });
 
         let command = Command {
@@ -188,12 +212,20 @@ impl CommandProcessor {
     }
 }
 
-impl ResponseProcessor for CommandProcessor {
-    type Error = Error;
+impl<E, DP: DataProcessor<Error = E>> ResponseProcessor for CommandProcessor<'_, E, DP> {
+    type Error = Error<E>;
 
-    fn process_response<'a>(&mut self, command: Command<'a>) -> Result<Response, Self::Error> {
+    fn process_response<'a>(
+        &mut self,
+        command: Command<'a>,
+    ) -> Result<ResponseProcessorResult, Self::Error> {
         match command.payload {
-            Payload::Data(items) => todo!(),
+            Payload::Data(data) => {
+                self.data_processor
+                    .process_data(command.destination, data)
+                    .map_err(Error::DataProcessingError)?;
+                Ok(ResponseProcessorResult::DataProcessd)
+            }
             Payload::Request {
                 command_id,
                 request,
@@ -209,7 +241,7 @@ impl ResponseProcessor for CommandProcessor {
                         response,
                     )?;
                     self.expected = None;
-                    Ok(response)
+                    Ok(ResponseProcessorResult::Response(response))
                 } else {
                     Err(Error::NoResponseExpected)
                 }
@@ -218,13 +250,13 @@ impl ResponseProcessor for CommandProcessor {
     }
 }
 
-impl Expectation {
+impl<E> Expectation<E> {
     fn validate_response_matches_expectation(
         &self,
         destination: Module,
         command_id: u8,
         response: Response,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error<E>> {
         if self.command_id != command_id {
             return Err(Error::UnexpectedCommandId(command_id));
         }
@@ -288,7 +320,10 @@ where
         Ok(())
     }
 
-    fn process_frame(&mut self, frame: &[u8]) -> Result<Response, DispatcherError<E>> {
+    fn process_frame(
+        &mut self,
+        frame: &[u8],
+    ) -> Result<ResponseProcessorResult, DispatcherError<E>> {
         let decoded = seven_bit_decode(&mut self.working, frame)
             .map_err(DispatcherError::SevenBitEncodingError)?;
         let command: Command = from_bytes(decoded).map_err(DispatcherError::PostcardError)?;
@@ -318,9 +353,12 @@ mod tests {
     impl ResponseProcessor for TestResponseProcessor {
         type Error = TestResponseProcessorError;
 
-        fn process_response<'a>(&mut self, command: Command<'a>) -> Result<Response, Self::Error> {
+        fn process_response<'a>(
+            &mut self,
+            command: Command<'a>,
+        ) -> Result<ResponseProcessorResult, Self::Error> {
             match command.payload {
-                Payload::Data(items) => todo!(),
+                Payload::Data(items) => return Ok(ResponseProcessorResult::DataProcessd),
                 Payload::Request {
                     command_id,
                     request,
@@ -330,9 +368,9 @@ mod tests {
                     response,
                 } => {
                     self.count += 1;
-                    return Ok(response);
+                    return Ok(ResponseProcessorResult::Response(response));
                 }
-            }
+            };
             Err(TestResponseProcessorError::NothingWorks)
         }
     }
@@ -413,7 +451,7 @@ mod tests {
     }
 
     impl Write for BufferWriter {
-        type Error = super::Error;
+        type Error = super::Error<TestDataProcessorError>;
 
         async fn write(&mut self, buffer: &[u8]) -> Result<(), Self::Error> {
             self.buffer.extend_from_slice(buffer).expect("Buffer full");
@@ -421,22 +459,26 @@ mod tests {
         }
     }
 
-    struct BufferReader<'a> {
-        buffer: &'a [u8],
+    struct TestDataProcessor {
+        data: std::vec::Vec<std::vec::Vec<u8>>,
     }
 
-    impl Read for BufferReader<'_> {
-        type Error = super::Error;
+    #[derive(Copy, Clone, PartialEq, Debug)]
+    enum TestDataProcessorError {}
+    impl DataProcessor for TestDataProcessor {
+        type Error = TestDataProcessorError;
 
-        async fn read_all(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
-            buffer[0..self.buffer.len()].copy_from_slice(self.buffer);
-            Ok(self.buffer.len())
+        fn process_data<'a>(&mut self, source: Module, data: &'a [u8]) -> Result<(), Self::Error> {
+            let mut data_vec = std::vec![];
+            data_vec.extend_from_slice(data);
+            self.data.push(data_vec);
+            Ok(())
         }
     }
-
     #[tokio::test]
     async fn command_processor_send_test() {
-        let mut command_processor = CommandProcessor::new();
+        let mut tdp = TestDataProcessor { data: std::vec![] };
+        let mut command_processor = CommandProcessor::new(&mut tdp);
         let mut writer = BufferWriter::new();
         let request = Request::Configure {
             bandwidth: Bandwidth::_400KHz,
@@ -444,12 +486,45 @@ mod tests {
             coding_rate: CodingRate::_4_8,
             frequency: 2450,
         };
-        let response = Response::Ack;
-        let response: Vec<u8, 256> = to_vec(&response).unwrap();
-        let mut reader = BufferReader { buffer: &response };
         assert!(command_processor
             .send(Module::Lora1, request, &mut writer)
             .await
             .is_ok());
+        let response = Command {
+            destination: Module::Lora1,
+            payload: Payload::Response {
+                command_id: 1,
+                response: Response::Ack,
+            },
+        };
+        assert_eq!(
+            command_processor.process_response(response),
+            Ok(ResponseProcessorResult::Response(Response::Ack))
+        );
+    }
+
+    #[tokio::test]
+    async fn command_processor_send_data() {
+        let mut tdp = TestDataProcessor { data: std::vec![] };
+        let mut command_processor = CommandProcessor::new(&mut tdp);
+        let mut writer = BufferWriter::new();
+        let request = Request::Configure {
+            bandwidth: Bandwidth::_400KHz,
+            spreading_factor: SpreadingFactor::_12,
+            coding_rate: CodingRate::_4_8,
+            frequency: 2450,
+        };
+        assert!(command_processor
+            .send(Module::Lora1, request, &mut writer)
+            .await
+            .is_ok());
+        let response = Command {
+            destination: Module::Lora1,
+            payload: Payload::Data(b"DIEZ WAS HERE"),
+        };
+        assert_eq!(
+            command_processor.process_response(response),
+            Ok(ResponseProcessorResult::DataProcessd)
+        );
     }
 }
