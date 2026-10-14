@@ -8,14 +8,14 @@ use crate::FrameResult::Nothing;
 use crate::Read;
 use crate::SelfContainedFrameParser;
 use crate::Write;
-#[cfg(not(test))]
-use embassy_time::Instant;
-#[cfg(not(test))]
-use embassy_time::Duration;
-#[cfg(test)]
-use mock_instant::global::Instant;
 #[cfg(test)]
 use core::time::Duration;
+#[cfg(not(test))]
+use embassy_time::Duration;
+#[cfg(not(test))]
+use embassy_time::Instant;
+#[cfg(test)]
+use mock_instant::global::Instant;
 
 use heapless::Vec;
 use postcard::{from_bytes, to_vec};
@@ -81,6 +81,8 @@ pub enum Payload<'a> {
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
 pub enum Request {
+    /// Just a test command
+    Ping,
     /// Ask for the current mode we're in
     Status,
     /// Configure the modulation and packet parameters.
@@ -96,6 +98,8 @@ pub enum Request {
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
 pub enum Response {
+    Pong,
+    /// A bunch of requests just need acknowledegment
     Ack,
     /// Report the current mode we are in
     Status(Mode),
@@ -121,13 +125,13 @@ impl<E> From<postcard::Error> for Error<E> {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-enum ResponseProcessorResult {
+pub enum ResponseProcessorResult {
     Nothing,
     DataProcessd,
     Response(Response),
 }
 
-trait ResponseProcessor {
+pub trait ResponseProcessor {
     type Error;
 
     /// Process a received response. Must be called
@@ -138,7 +142,7 @@ trait ResponseProcessor {
     ) -> Result<ResponseProcessorResult, Self::Error>;
 }
 
-trait DataProcessor {
+pub trait DataProcessor {
     type Error;
 
     fn process_data<'a>(&mut self, source: Module, data: &'a [u8]) -> Result<(), Self::Error>;
@@ -155,7 +159,7 @@ trait DataProcessor {
 ///  - A timeout can occur and means an error state for
 ///    which higher levels are responsible, it's not the job
 ///    of CommandProcessor to deal with this e.g. by retries.
-struct CommandProcessor<'a, E, DP: DataProcessor<Error = E>> {
+pub struct CommandProcessor<'a, E, DP: DataProcessor<Error = E>> {
     command_id: u8,
     expected: Option<Expectation<E>>,
     data_processor: &'a mut DP,
@@ -165,6 +169,7 @@ struct CommandProcessor<'a, E, DP: DataProcessor<Error = E>> {
 enum ResponseKind {
     Status,
     Configure,
+    Pong,
 }
 
 impl From<Request> for ResponseKind {
@@ -172,6 +177,7 @@ impl From<Request> for ResponseKind {
         match value {
             Request::Status => ResponseKind::Status,
             Request::Configure { .. } => ResponseKind::Configure,
+            Request::Ping => ResponseKind::Pong,
         }
     }
 }
@@ -185,7 +191,7 @@ struct Expectation<E> {
 }
 
 impl<'dp, E, DP: DataProcessor<Error = E>> CommandProcessor<'dp, E, DP> {
-    fn new(data_processor: &'dp mut DP) -> Self {
+    pub fn new(data_processor: &'dp mut DP) -> Self {
         Self {
             command_id: 0,
             expected: None,
@@ -199,7 +205,7 @@ impl<'dp, E, DP: DataProcessor<Error = E>> CommandProcessor<'dp, E, DP> {
         res
     }
 
-    async fn send(
+    pub async fn send(
         &mut self,
         destination: Module,
         request: Request,
@@ -244,7 +250,7 @@ impl<E, DP: DataProcessor<Error = E>> ResponseProcessor for CommandProcessor<'_,
                     Ok(ResponseProcessorResult::DataProcessd)
                 }
                 Payload::Request {
-                command_id,
+                    command_id,
                     request,
                 } => Err(Error::NotAResponse),
                 Payload::Response {
@@ -259,7 +265,7 @@ impl<E, DP: DataProcessor<Error = E>> ResponseProcessor for CommandProcessor<'_,
                         )?;
                         self.expected = None;
                         Ok(ResponseProcessorResult::Response(response))
-                } else {
+                    } else {
                         Err(Error::NoResponseExpected)
                     }
                 }
@@ -315,7 +321,7 @@ enum DispatcherError<E> {
 /// Processing incoming bytes from uart according
 /// to both our framing and 7-bit encoding to
 /// yield Responses.
-struct IncomingDataDispatcher<'a, 'b, E, RP: ResponseProcessor<Error = E>, FP: FrameProcessor> {
+pub struct IncomingDataDispatcher<'a, 'b, E, RP: ResponseProcessor<Error = E>, FP: FrameProcessor> {
     processor: &'a mut RP,
     frame_parser: &'b mut FP,
     working: [u8; 128],
@@ -365,9 +371,9 @@ where
 mod tests {
     use core::time::Duration;
 
-use mock_instant::global::MockClock;
+    use mock_instant::global::MockClock;
 
-use crate::encode_frame;
+    use crate::encode_frame;
 
     use super::*;
     extern crate std;
@@ -508,6 +514,7 @@ use crate::encode_frame;
             Ok(())
         }
     }
+
     #[tokio::test]
     async fn command_processor_send_test() {
         let mut tdp = TestDataProcessor { data: std::vec![] };
@@ -550,7 +557,7 @@ use crate::encode_frame;
         assert!(command_processor
             .send(Module::Lora1, request, &mut writer)
             .await
-                .is_ok());
+            .is_ok());
         MockClock::advance(Duration::from_secs(15));
         assert_eq!(
             command_processor.process_response_or_timeout(None),
@@ -568,7 +575,6 @@ use crate::encode_frame;
             command_processor.process_response_or_timeout(Some(response)),
             Err(Error::NoResponseExpected)
         );
-
     }
 
     #[tokio::test]

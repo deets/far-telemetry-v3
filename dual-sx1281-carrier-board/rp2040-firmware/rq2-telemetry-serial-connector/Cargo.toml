@@ -9,10 +9,13 @@ postcard.workspace = true
 serde.workspace = true
 num-integer.workspace = true
 embassy-time.workspace = true
+rq2-telemetry-parser = { path = "../rq2-telemetry-parser" }
 tokio-serial = "5.5.0"
 tokio = { version = "1.53.2", features = ["time", "tracing", "macros", "mio", "fs", "rt"] }
 clap = { version = "4.6.7", features = ["derive", "env"] }
 eyre = "0.6.14"
+env_logger = "0.11.11"
+tracing = { version = "0.1.44", features = ["log"] }
 
 [dev-dependencies]
 tokio = { version = "1.53.2", features = ["time", "macros", "rt"] }

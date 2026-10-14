@@ -1,6 +1,33 @@
-use tokio_serial::{available_ports, SerialPortInfo, SerialPortType::UsbPort};
+use clap::{Parser, Subcommand};
+use eyre::bail;
+use rq2_telemetry_parser::{
+    Bandwidth, CodingRate, CommandProcessor, DataProcessor, Error as CommandError,
+    IncomingDataDispatcher, Module, Request, SelfContainedFrameParser, SpreadingFactor, Write,
+};
 
-fn default_port() -> eyre::Result<Option<SerialPortInfo>> {
+use tokio_serial::{
+    available_ports, SerialPort, SerialPortBuilderExt, SerialPortInfo, SerialPortType::UsbPort,
+};
+use tracing::{debug, error};
+
+#[derive(Parser)]
+#[command(version, about, long_about = None)]
+struct Cli {
+    /// Port to open
+    serial_port: Option<String>,
+    /// Speed
+    #[arg(short, default_value_t = 115200)]
+    serial_speed: u32,
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Ping,
+}
+
+fn default_port() -> eyre::Result<String> {
     let mut res = vec![];
     for port in available_ports()? {
         if let UsbPort(_) = port.port_type {
@@ -8,15 +35,77 @@ fn default_port() -> eyre::Result<Option<SerialPortInfo>> {
         }
     }
     if res.len() == 1 {
-        return Ok(res.get(0).cloned());
+        return Ok(res.get(0).unwrap().port_name.clone());
     }
-    Ok(None)
+    eyre::bail!("No serial port")
+}
+
+#[derive(Default)]
+struct TestDataProcessor {
+    data: std::vec::Vec<std::vec::Vec<u8>>,
+}
+
+#[derive(Copy, Clone, PartialEq, Debug)]
+enum TestDataProcessorError {
+    SerialError,
+}
+
+impl DataProcessor for TestDataProcessor {
+    type Error = TestDataProcessorError;
+
+    fn process_data<'a>(&mut self, source: Module, data: &'a [u8]) -> Result<(), Self::Error> {
+        let mut data_vec = std::vec![];
+        data_vec.extend_from_slice(data);
+        self.data.push(data_vec);
+        Ok(())
+    }
+}
+
+struct WriteHelper<'a> {
+    port: &'a mut dyn SerialPort,
+}
+
+impl Write for WriteHelper<'_> {
+    type Error = CommandError<TestDataProcessorError>;
+
+    async fn write(&mut self, buffer: &[u8]) -> Result<(), Self::Error> {
+        self.port
+            .write_all(buffer)
+            .map_err(|_| CommandError::DataProcessingError(TestDataProcessorError::SerialError))?;
+        Ok(())
+    }
+}
+
+async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
+    debug!("serial_port: {serial_port}");
+    let mut port = tokio_serial::new(serial_port, args.serial_speed).open_native_async()?;
+    let mut parser = SelfContainedFrameParser::new();
+    let mut tdp = TestDataProcessor::default();
+    let mut processor = CommandProcessor::new(&mut tdp);
+    let mut dispatcher = IncomingDataDispatcher::new(&mut processor, &mut parser);
+    let mut tdp = TestDataProcessor { data: std::vec![] };
+
+    let request = Request::Ping;
+    let mut write_helper = WriteHelper { port: &mut port };
+    processor
+        .send(Module::Lora1, request, &mut write_helper)
+        .await
+        .map_err(|_| eyre::eyre!("Can't send data!"))?;
+    Ok(())
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> eyre::Result<()> {
-    if let Some(port) = default_port()? {
-        println!("could open {port:?}");
+    let cli = Cli::parse();
+    env_logger::init();
+    let port = cli.serial_port.clone().or_else(|| default_port().ok());
+    match port {
+        Some(port) => {
+            work(cli, port).await?;
+        }
+        None => {
+            error!("No port given or found");
+        }
     }
     Ok(())
 }
