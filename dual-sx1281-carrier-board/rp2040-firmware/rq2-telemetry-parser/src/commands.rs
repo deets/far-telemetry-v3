@@ -8,6 +8,15 @@ use crate::FrameResult::Nothing;
 use crate::Read;
 use crate::SelfContainedFrameParser;
 use crate::Write;
+#[cfg(not(test))]
+use embassy_time::Instant;
+#[cfg(not(test))]
+use embassy_time::Duration;
+#[cfg(test)]
+use mock_instant::global::Instant;
+#[cfg(test)]
+use core::time::Duration;
+
 use heapless::Vec;
 use postcard::{from_bytes, to_vec};
 use serde::{Deserialize, Serialize};
@@ -113,6 +122,7 @@ impl<E> From<postcard::Error> for Error<E> {
 
 #[derive(Debug, Eq, PartialEq)]
 enum ResponseProcessorResult {
+    Nothing,
     DataProcessd,
     Response(Response),
 }
@@ -120,9 +130,11 @@ enum ResponseProcessorResult {
 trait ResponseProcessor {
     type Error;
 
-    fn process_response<'a>(
+    /// Process a received response. Must be called
+    /// regularly with None to check for a timeout.
+    fn process_response_or_timeout<'a>(
         &mut self,
-        command: Command<'a>,
+        command: Option<Command<'a>>,
     ) -> Result<ResponseProcessorResult, Self::Error>;
 }
 
@@ -168,6 +180,7 @@ struct Expectation<E> {
     command_id: u8,
     destination: Module,
     response_kind: ResponseKind,
+    when: Instant,
     phantom_data: PhantomData<E>,
 }
 
@@ -197,6 +210,7 @@ impl<'dp, E, DP: DataProcessor<Error = E>> CommandProcessor<'dp, E, DP> {
             command_id,
             destination,
             response_kind: request.into(),
+            when: Instant::now(),
             phantom_data: PhantomData,
         });
 
@@ -212,39 +226,54 @@ impl<'dp, E, DP: DataProcessor<Error = E>> CommandProcessor<'dp, E, DP> {
     }
 }
 
+const RESPONSE_EXPECTATION_TIMEOUT: Duration = Duration::from_secs(1);
+
 impl<E, DP: DataProcessor<Error = E>> ResponseProcessor for CommandProcessor<'_, E, DP> {
     type Error = Error<E>;
 
-    fn process_response<'a>(
+    fn process_response_or_timeout<'a>(
         &mut self,
-        command: Command<'a>,
+        command: Option<Command<'a>>,
     ) -> Result<ResponseProcessorResult, Self::Error> {
-        match command.payload {
-            Payload::Data(data) => {
-                self.data_processor
-                    .process_data(command.destination, data)
-                    .map_err(Error::DataProcessingError)?;
-                Ok(ResponseProcessorResult::DataProcessd)
-            }
-            Payload::Request {
-                command_id,
-                request,
-            } => Err(Error::NotAResponse),
-            Payload::Response {
-                command_id,
-                response,
-            } => {
-                if let Some(expectation) = &self.expected {
-                    expectation.validate_response_matches_expectation(
-                        command.destination,
-                        command_id,
-                        response,
-                    )?;
-                    self.expected = None;
-                    Ok(ResponseProcessorResult::Response(response))
-                } else {
-                    Err(Error::NoResponseExpected)
+        if let Some(command) = command {
+            match command.payload {
+                Payload::Data(data) => {
+                    self.data_processor
+                        .process_data(command.destination, data)
+                        .map_err(Error::DataProcessingError)?;
+                    Ok(ResponseProcessorResult::DataProcessd)
                 }
+                Payload::Request {
+                command_id,
+                    request,
+                } => Err(Error::NotAResponse),
+                Payload::Response {
+                    command_id,
+                    response,
+                } => {
+                    if let Some(expectation) = &self.expected {
+                        expectation.validate_response_matches_expectation(
+                            command.destination,
+                            command_id,
+                            response,
+                        )?;
+                        self.expected = None;
+                        Ok(ResponseProcessorResult::Response(response))
+                } else {
+                        Err(Error::NoResponseExpected)
+                    }
+                }
+            }
+        } else {
+            if let Some(expectation) = &self.expected {
+                if expectation.when.elapsed() > RESPONSE_EXPECTATION_TIMEOUT {
+                    self.expected = None;
+                    Err(Error::Timeout)
+                } else {
+                    Ok(ResponseProcessorResult::Nothing)
+                }
+            } else {
+                Ok(ResponseProcessorResult::Nothing)
             }
         }
     }
@@ -311,7 +340,6 @@ where
         match frame_result {
             Ok(FrameResult::Frame(frame)) => {
                 frame_copy[0..frame.len()].copy_from_slice(frame);
-                drop(frame);
                 self.process_frame(&frame_copy)?;
             }
             Ok(Nothing) => {}
@@ -328,14 +356,18 @@ where
             .map_err(DispatcherError::SevenBitEncodingError)?;
         let command: Command = from_bytes(decoded).map_err(DispatcherError::PostcardError)?;
         self.processor
-            .process_response(command)
+            .process_response_or_timeout(Some(command))
             .map_err(DispatcherError::ResponseError)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::encode_frame;
+    use core::time::Duration;
+
+use mock_instant::global::MockClock;
+
+use crate::encode_frame;
 
     use super::*;
     extern crate std;
@@ -353,10 +385,11 @@ mod tests {
     impl ResponseProcessor for TestResponseProcessor {
         type Error = TestResponseProcessorError;
 
-        fn process_response<'a>(
+        fn process_response_or_timeout<'a>(
             &mut self,
-            command: Command<'a>,
+            command: Option<Command<'a>>,
         ) -> Result<ResponseProcessorResult, Self::Error> {
+            let command = command.unwrap();
             match command.payload {
                 Payload::Data(items) => return Ok(ResponseProcessorResult::DataProcessd),
                 Payload::Request {
@@ -498,9 +531,44 @@ mod tests {
             },
         };
         assert_eq!(
-            command_processor.process_response(response),
+            command_processor.process_response_or_timeout(Some(response)),
             Ok(ResponseProcessorResult::Response(Response::Ack))
         );
+    }
+
+    #[tokio::test]
+    async fn command_processor_send_with_timeout() {
+        let mut tdp = TestDataProcessor { data: std::vec![] };
+        let mut command_processor = CommandProcessor::new(&mut tdp);
+        let mut writer = BufferWriter::new();
+        let request = Request::Configure {
+            bandwidth: Bandwidth::_400KHz,
+            spreading_factor: SpreadingFactor::_12,
+            coding_rate: CodingRate::_4_8,
+            frequency: 2450,
+        };
+        assert!(command_processor
+            .send(Module::Lora1, request, &mut writer)
+            .await
+                .is_ok());
+        MockClock::advance(Duration::from_secs(15));
+        assert_eq!(
+            command_processor.process_response_or_timeout(None),
+            Err(Error::Timeout)
+        );
+        let response = Command {
+            destination: Module::Lora1,
+            payload: Payload::Response {
+                command_id: 1,
+                response: Response::Ack,
+            },
+        };
+        // Ensure we are removing the expectation after a timout
+        assert_eq!(
+            command_processor.process_response_or_timeout(Some(response)),
+            Err(Error::NoResponseExpected)
+        );
+
     }
 
     #[tokio::test]
@@ -523,7 +591,7 @@ mod tests {
             payload: Payload::Data(b"DIEZ WAS HERE"),
         };
         assert_eq!(
-            command_processor.process_response(response),
+            command_processor.process_response_or_timeout(Some(response)),
             Ok(ResponseProcessorResult::DataProcessd)
         );
     }

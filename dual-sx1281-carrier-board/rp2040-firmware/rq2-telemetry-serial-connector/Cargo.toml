@@ -1,0 +1,19 @@
+[package]
+name = "rq2-telemetry-serial-connector"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+heapless.workspace = true
+postcard.workspace = true
+serde.workspace = true
+num-integer.workspace = true
+embassy-time.workspace = true
+tokio-serial = "5.5.0"
+tokio = { version = "1.53.2", features = ["time", "tracing", "macros", "mio", "fs", "rt"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
+eyre = "0.6.14"
+
+[dev-dependencies]
+tokio = { version = "1.53.2", features = ["time", "macros", "rt"] }
+mock_instant.workspace = true

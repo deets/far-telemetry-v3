@@ -6,11 +6,12 @@ edition = "2021"
 [dependencies]
 base64-ng = { version = "2.0.4", default-features = false }
 embassy-futures = "0.1.2"
-heapless = "0.7.17"
-postcard = "1.1.3"
-serde = { version = "1.0.229", default-features = false, features = ["derive"] }
-num-integer = { workspace = true }
+heapless.workspace = true   
+postcard.workspace = true
+serde.workspace = true
+num-integer.workspace = true
+embassy-time.workspace = true
 
 [dev-dependencies]
 tokio = { version = "1.53.2", features = ["time", "macros", "rt"] }
-
+mock_instant.workspace = true
