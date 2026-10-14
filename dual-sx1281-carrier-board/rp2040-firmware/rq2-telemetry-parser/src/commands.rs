@@ -8,14 +8,23 @@ use crate::FrameResult::Nothing;
 use crate::Read;
 use crate::SelfContainedFrameParser;
 use crate::Write;
+
 #[cfg(test)]
 use core::time::Duration;
-#[cfg(not(test))]
-use embassy_time::Duration;
-#[cfg(not(test))]
-use embassy_time::Instant;
 #[cfg(test)]
 use mock_instant::global::Instant;
+
+#[cfg(all(not(test), not(feature = "use_std_time")))]
+use embassy_time::Duration;
+#[cfg(all(not(test), not(feature = "use_std_time")))]
+use embassy_time::Instant;
+
+#[cfg(all(not(test), feature = "use_std_time"))]
+extern crate std;
+#[cfg(all(not(test), feature = "use_std_time"))]
+use std::time::Duration;
+#[cfg(all(not(test), feature = "use_std_time"))]
+use std::time::Instant;
 
 use heapless::Vec;
 use postcard::{from_bytes, to_vec};
@@ -67,9 +76,9 @@ pub enum Module {
 /// module.
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 pub struct Command<'a> {
-    destination: Module,
+    pub destination: Module,
     #[serde(borrow)]
-    payload: Payload<'a>,
+    pub payload: Payload<'a>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
@@ -311,7 +320,7 @@ impl<E> Expectation<E> {
 }
 
 #[derive(Debug, PartialEq)]
-enum DispatcherError<E> {
+pub enum DispatcherError<E> {
     FrameError(crate::FrameError),
     SevenBitEncodingError(crate::SevenBitTranscoderError),
     PostcardError(postcard::Error),

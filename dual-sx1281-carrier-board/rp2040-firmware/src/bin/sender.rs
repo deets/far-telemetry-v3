@@ -10,22 +10,20 @@ use embassy_rp::bind_interrupts;
 use embassy_rp::gpio::{Input, Level, Output, Pin, Pull};
 use embassy_rp::peripherals::{SPI0, UART0};
 use embassy_rp::spi::{Async, Config, Spi};
-use embassy_rp::uart::{InterruptHandler, Uart, Config as UartConfig};
+use embassy_rp::uart::{Config as UartConfig, InterruptHandler, Uart};
 use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use lora_phy::iv::GenericSx128xInterfaceVariant;
-use lora_phy::sx128x::{Sx1281, Sx128x,};
+use lora_phy::sx128x::{Sx1281, Sx128x};
 use lora_phy::LoRa;
 use lora_phy::{mod_params::*, sx128x};
 use rf_range_test::host_interface::uart_task;
 use rf_range_test::receiver_task;
 use {defmt_rtt as _, panic_probe as _};
 
-
 bind_interrupts!(struct Irqs {
     UART0_IRQ => InterruptHandler<UART0>;
 });
-
 
 const LORA_FREQUENCY_IN_HZ: u32 = 2_450_000_000; // warning: set this appropriately for the region
 
@@ -41,8 +39,16 @@ async fn main(spawner: Spawner) {
     let lora1_tx_en = Output::new(p.PIN_9.degrade(), Level::Low);
 
     let (tx_pin, rx_pin, uart) = (p.PIN_0, p.PIN_1, p.UART0);
-    let uart = Uart::new(uart, tx_pin, rx_pin, Irqs, p.DMA_CH4, p.DMA_CH5, UartConfig::default());
-    
+    let uart = Uart::new(
+        uart,
+        tx_pin,
+        rx_pin,
+        Irqs,
+        p.DMA_CH4,
+        p.DMA_CH5,
+        UartConfig::default(),
+    );
+
     let lora1_spi = Spi::new(
         p.SPI0,
         p.PIN_2,
@@ -53,23 +59,29 @@ async fn main(spawner: Spawner) {
         Config::default(),
     );
 
-    
     let lora1_spi = ExclusiveDevice::new(lora1_spi, lora1_nss, Delay);
-    info!("running");    
+    info!("running");
     let lora1_config = sx128x::Config {
         chip: Sx1281,
         tcxo_used: true,
         tx_boost: true,
         rx_boost: false,
     };
-    let lora1_iv = GenericSx128xInterfaceVariant::new(lora1_reset, lora1_irq, lora1_busy, Some(lora1_rx_en), Some(lora1_tx_en)).unwrap();
+    let lora1_iv = GenericSx128xInterfaceVariant::new(
+        lora1_reset,
+        lora1_irq,
+        lora1_busy,
+        Some(lora1_rx_en),
+        Some(lora1_tx_en),
+    )
+    .unwrap();
     info!("Created GenericSx128xInterfaceVariant");
-    
+
     let lora1 = LoRa::new(Sx128x::new(lora1_spi, lora1_iv, lora1_config), false, Delay)
         .await
         .unwrap();
     info!("Created lora1");
-    spawner.spawn(sender_task(lora1)).expect("Can't spawn sender task");
+    //spawner.spawn(sender_task(lora1)).expect("Can't spawn sender task");
 
     let lora2_nss = Output::new(p.PIN_13.degrade(), Level::High);
     let lora2_busy = Input::new(p.PIN_17.degrade(), Pull::None);
@@ -78,7 +90,6 @@ async fn main(spawner: Spawner) {
     let lora2_rx_en = Output::new(p.PIN_15.degrade(), Level::Low);
     let lora2_tx_en = Output::new(p.PIN_19.degrade(), Level::Low);
 
-    
     let lora2_spi = Spi::new(
         p.SPI1,
         p.PIN_14,
@@ -96,18 +107,34 @@ async fn main(spawner: Spawner) {
         tx_boost: true,
         rx_boost: true,
     };
-    let lora2_iv = GenericSx128xInterfaceVariant::new(lora2_reset, lora2_irq, lora2_busy, Some(lora2_rx_en), Some(lora2_tx_en)).unwrap();
+    let lora2_iv = GenericSx128xInterfaceVariant::new(
+        lora2_reset,
+        lora2_irq,
+        lora2_busy,
+        Some(lora2_rx_en),
+        Some(lora2_tx_en),
+    )
+    .unwrap();
     info!("Created GenericSx128xInterfaceVariant");
-    
+
     let lora2 = LoRa::new(Sx128x::new(lora2_spi, lora2_iv, lora2_config), false, Delay)
         .await
         .unwrap();
-    spawner.spawn(receiver_task(lora2)).expect("Can't spawn receiver task");
+    //spawner.spawn(receiver_task(lora2)).expect("Can't spawn receiver task");
     uart_task(uart).await;
 }
 
- #[embassy_executor::task]
-async fn sender_task(mut lora1: LoRa<Sx128x<ExclusiveDevice<Spi<'static, SPI0, Async>, Output<'static>, Delay>, GenericSx128xInterfaceVariant<Output<'static>, Input<'static>>, Sx1281>, Delay>) {
+#[embassy_executor::task]
+async fn sender_task(
+    mut lora1: LoRa<
+        Sx128x<
+            ExclusiveDevice<Spi<'static, SPI0, Async>, Output<'static>, Delay>,
+            GenericSx128xInterfaceVariant<Output<'static>, Input<'static>>,
+            Sx1281,
+        >,
+        Delay,
+    >,
+) {
     let mdltn_params = {
         match lora1.create_modulation_params(
             SpreadingFactor::_12,
