@@ -1,12 +1,16 @@
 use core::marker::PhantomData;
 
+use crate::encode_frame;
 use crate::seven_bit_decode;
+use crate::seven_bit_encode;
+use crate::FrameError;
 use crate::FrameParser;
 use crate::FrameProcessor;
 use crate::FrameResult;
 use crate::FrameResult::Nothing;
 use crate::Read;
 use crate::SelfContainedFrameParser;
+use crate::SevenBitTranscoderError;
 use crate::Write;
 
 #[cfg(test)]
@@ -376,6 +380,49 @@ where
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum EncodedFrameWriterError<E> {
+    FrameError(FrameError),
+    SevenBitTranscoderError(SevenBitTranscoderError),
+    WriterError(E),
+}
+
+pub struct EncodedFrameWriter<'a, W, E>
+where
+    W: super::Write<Error = E>,
+{
+    writer: &'a mut W,
+}
+
+impl<'a, W, E> EncodedFrameWriter<'a, W, E>
+where
+    W: super::Write<Error = E>,
+{
+    pub fn new(writer: &'a mut W) -> EncodedFrameWriter<'a, W, E> {
+        EncodedFrameWriter { writer }
+    }
+}
+
+impl<W, E> super::Write for EncodedFrameWriter<'_, W, E>
+where
+    W: super::Write<Error = E>,
+{
+    type Error = EncodedFrameWriterError<E>;
+
+    async fn write(&mut self, incoming: &[u8]) -> Result<(), Self::Error> {
+        let mut seven_bit_buffer = [0; 128];
+        let seven_bit_data = seven_bit_encode(&mut seven_bit_buffer, incoming)
+            .map_err(EncodedFrameWriterError::SevenBitTranscoderError)?;
+        let mut buffer = [0; 128];
+        let encoded_frame = encode_frame(&mut buffer, seven_bit_data)
+            .map_err(EncodedFrameWriterError::FrameError)?;
+        self.writer
+            .write(encoded_frame)
+            .await
+            .map_err(EncodedFrameWriterError::WriterError)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use core::time::Duration;
@@ -522,6 +569,17 @@ mod tests {
             self.data.push(data_vec);
             Ok(())
         }
+    }
+
+    #[tokio::test]
+    async fn encoded_frame_write_test() {
+        let mut writer = BufferWriter::new();
+        let mut encoded_frame_writer = EncodedFrameWriter::new(&mut writer);
+        encoded_frame_writer
+            .write(b"DIEZ WAS HERE")
+            .await
+            .expect("Error writing");
+        assert_eq!(writer.buffer.len(), 16);
     }
 
     #[tokio::test]

@@ -1,8 +1,11 @@
+use std::time::Duration;
+
 use clap::{Parser, Subcommand};
 use eyre::bail;
 use rq2_telemetry_parser::{
-    Bandwidth, CodingRate, CommandProcessor, DataProcessor, Error as CommandError,
-    IncomingDataDispatcher, Module, Request, SelfContainedFrameParser, SpreadingFactor, Write,
+    Bandwidth, CodingRate, CommandProcessor, DataProcessor, EncodedFrameWriter,
+    Error as CommandError, IncomingDataDispatcher, Module, Request, SelfContainedFrameParser,
+    SpreadingFactor, Write,
 };
 
 use tokio_serial::{
@@ -87,10 +90,12 @@ async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
 
     let request = Request::Ping;
     let mut write_helper = WriteHelper { port: &mut port };
+    let mut encoded_writer = EncodedFrameWriter::new(&mut write_helper);
     processor
         .send(Module::Lora1, request, &mut write_helper)
         .await
         .map_err(|_| eyre::eyre!("Can't send data!"))?;
+    tokio::time::sleep(Duration::from_secs(2)).await;
     Ok(())
 }
 

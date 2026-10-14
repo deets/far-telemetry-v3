@@ -60,17 +60,18 @@ pub async fn uart_task(uart: Uart<'static, UART0, Async>) {
     let mut dispatcher = IncomingDataDispatcher::new(&mut processor, &mut parser);
     let (mut outgoing, mut incoming) = uart.split();
     loop {
-        info!("test");
-        outgoing.write(b"TEST");
-    }
-    loop {
         let mut buffer = [0; 1];
         info!("wait for incoming uart data");
         match incoming.read(&mut buffer).await {
-            Ok(_) => dispatcher
-                .feed(buffer[0])
-                .await
-                .expect("Can't process data"),
+            Ok(_) => {
+                info!("{}", buffer[0]);
+                match dispatcher.feed(buffer[0]).await {
+                    Ok(_) => {
+                        info!("all good");
+                    }
+                    Err(e) => error!("Got error: {:?}", defmt::Debug2Format(&e)),
+                }
+            }
             Err(e) => error!("Got error: {:?}", e),
         }
     }
