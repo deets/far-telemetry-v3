@@ -1,12 +1,10 @@
 use clap::{Parser, Subcommand};
-use eyre::bail;
 use postcard::to_vec;
 use rq2_telemetry_parser::{
-    Bandwidth, CodingRate, CommandProcessor, DataProcessor, EncodedFrameWriter,
-    Error as CommandError, IncomingDataProcessor, Module, Request, SelfContainedFrameParser,
-    SpreadingFactor, Write,
+    Command, CommandProcessor, DataProcessor, EncodedFrameWriter, IncomingDataProcessor, Module,
+    Request, SelfContainedFrameParser, Write,
 };
-use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use tokio_serial::{available_ports, SerialPortBuilderExt, SerialPortType::UsbPort, SerialStream};
 use tracing::{debug, error};
@@ -72,31 +70,35 @@ impl Write for SerialPortWriteHelper<'_> {
     }
 }
 
+async fn send_command(port: &mut SerialStream, command: Command<'_>) -> eyre::Result<()> {
+    let output: heapless::Vec<u8, 256> = to_vec(&command)?;
+    let mut write_helper = SerialPortWriteHelper { port };
+    let mut encoded_writer = EncodedFrameWriter::new(&mut write_helper);
+    encoded_writer
+        .write(&output)
+        .await
+        .map_err(|_| eyre::eyre!("Can't write data!"))
+}
+
 async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
     debug!("serial_port: {serial_port}");
     let mut port = tokio_serial::new(serial_port, args.serial_speed).open_native_async()?;
     let mut parser = SelfContainedFrameParser::new();
     let mut tdp = TestDataProcessor::default();
     let mut processor = CommandProcessor::new(&mut tdp);
-    let mut dispatcher = IncomingDataProcessor::new(&mut parser);
+    let mut incoming_processor = IncomingDataProcessor::new(&mut parser);
     let request = Request::Ping;
-    let mut write_helper = SerialPortWriteHelper { port: &mut port };
-    let mut encoded_writer = EncodedFrameWriter::new(&mut write_helper);
+
     let command = processor
         .send(Module::Lora1, request)
         .await
         .map_err(|_| eyre::eyre!("Can't process request!"))?;
-    let output: heapless::Vec<u8, 256> = to_vec(&command).unwrap();
-    encoded_writer
-        .write(&output)
-        .await
-        .map_err(|_| eyre::eyre!("Can't write data!"))?;
-    drop(encoded_writer);
-    drop(write_helper);
+    send_command(&mut port, command).await?;
+
     loop {
         let mut buffer = [0; 1];
         port.read(&mut buffer).await?;
-        match dispatcher
+        match incoming_processor
             .feed(buffer[0])
             .await
             .map_err(|e| eyre::eyre!("dispatch error: {:#?}", e))?
