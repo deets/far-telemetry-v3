@@ -2,15 +2,20 @@
 mod commands;
 mod crc;
 mod framing;
+use core::future::Future;
+
 pub use commands::*;
 pub use framing::*;
 
 pub trait Write {
     type Error;
-    async fn write(&mut self, buffer: &[u8]) -> Result<(), Self::Error>;
+    fn write(&mut self, buffer: &[u8]) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 pub trait Read {
     type Error;
-    async fn read_all(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error>;
+    fn read_all(
+        &mut self,
+        buffer: &mut [u8],
+    ) -> impl Future<Output = Result<usize, Self::Error>> + Send;
 }

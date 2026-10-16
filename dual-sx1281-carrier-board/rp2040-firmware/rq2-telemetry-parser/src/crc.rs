@@ -11,6 +11,7 @@ pub enum CrcError {
 /// However the algorithm itself doesnt' care about the actual
 /// bytes being compliant themselves.
 /// Implementation chosen from https://medo64.com/posts/selecting-8-bit-crc
+#[allow(dead_code)]
 pub fn check_crc(buffer: &[u8]) -> Result<(), CrcError> {
     if buffer.len() < 3 {
         return Err(CrcError::BufferTooSmall);

@@ -4,14 +4,10 @@ use crate::encode_frame;
 use crate::seven_bit_decode;
 use crate::seven_bit_encode;
 use crate::FrameError;
-use crate::FrameParser;
 use crate::FrameProcessor;
 use crate::FrameResult;
 use crate::FrameResult::Nothing;
-use crate::Read;
-use crate::SelfContainedFrameParser;
 use crate::SevenBitTranscoderError;
-use crate::Write;
 
 #[cfg(test)]
 use core::time::Duration;
@@ -30,10 +26,8 @@ use std::time::Duration;
 #[cfg(all(not(test), feature = "use_std_time"))]
 use std::time::Instant;
 
-use heapless::Vec;
-use postcard::{from_bytes, to_vec};
+use postcard::from_bytes;
 use serde::{Deserialize, Serialize};
-use Error::DataProcessingError;
 use Error::SerializationError;
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
@@ -241,8 +235,8 @@ impl<'dp, E, DP: DataProcessor<Error = E>> CommandProcessor<'dp, E, DP> {
                     Ok(None)
                 }
                 Payload::Request {
-                    command_id,
-                    request,
+                    command_id: _,
+                    request: _,
                 } => Err(Error::NotAResponse),
                 Payload::Response {
                     command_id,
@@ -329,7 +323,7 @@ where
         }
     }
 
-    pub async fn feed(&mut self, data: u8) -> Result<Option<Command>, DispatcherError> {
+    pub async fn feed(&mut self, data: u8) -> Result<Option<Command<'_>>, DispatcherError> {
         let frame_result = self.frame_parser.feed(data);
         let mut frame_copy = [0; 128];
         match frame_result {
@@ -342,7 +336,10 @@ where
         }
     }
 
-    async fn process_frame(&mut self, frame: &[u8]) -> Result<Option<Command>, DispatcherError> {
+    async fn process_frame(
+        &mut self,
+        frame: &[u8],
+    ) -> Result<Option<Command<'_>>, DispatcherError> {
         let decoded = seven_bit_decode(&mut self.working, frame)
             .map_err(DispatcherError::SevenBitEncodingError)?;
         Ok(Some(
@@ -360,14 +357,14 @@ pub enum EncodedFrameWriterError<E> {
 
 pub struct EncodedFrameWriter<'a, W, E>
 where
-    W: super::Write<Error = E>,
+    W: super::Write<Error = E> + Send,
 {
     writer: &'a mut W,
 }
 
 impl<'a, W, E> EncodedFrameWriter<'a, W, E>
 where
-    W: super::Write<Error = E>,
+    W: super::Write<Error = E> + Send,
 {
     pub fn new(writer: &'a mut W) -> EncodedFrameWriter<'a, W, E> {
         EncodedFrameWriter { writer }
@@ -376,7 +373,7 @@ where
 
 impl<W, E> super::Write for EncodedFrameWriter<'_, W, E>
 where
-    W: super::Write<Error = E>,
+    W: super::Write<Error = E> + Send,
 {
     type Error = EncodedFrameWriterError<E>;
 
@@ -399,15 +396,16 @@ mod tests {
     use core::time::Duration;
 
     use mock_instant::global::MockClock;
+    use postcard::to_vec;
 
-    use crate::encode_frame;
+    use crate::{SelfContainedFrameParser, Write};
 
     use super::*;
     extern crate std;
     extern crate tokio;
 
     fn serialize_command<'a>(buffer: &'a mut [u8], command: &Command) -> &'a [u8] {
-        let output: Vec<u8, 256> = to_vec(&command).unwrap();
+        let output: heapless::Vec<u8, 256> = to_vec(&command).unwrap();
         let mut encoded_buffer = [0; 127];
         let encoded = crate::framing::seven_bit_encode(&mut encoded_buffer, &output)
             .expect("Can't encode 7-bit");
@@ -441,7 +439,7 @@ mod tests {
             destination: Module::Lora1,
             payload: Payload::Data(data.as_slice()),
         };
-        let output: Vec<u8, 256> = to_vec(&command).unwrap();
+        let output: heapless::Vec<u8, 256> = to_vec(&command).unwrap();
         std::println!(
             "{:?}, len data: {}, output len: {}",
             output,
@@ -461,7 +459,7 @@ mod tests {
                 },
             },
         };
-        let output: Vec<u8, 256> = to_vec(&command).unwrap();
+        let output: heapless::Vec<u8, 256> = to_vec(&command).unwrap();
         std::println!(
             "{:?}, len data: {}, output len: {}",
             output,
@@ -471,12 +469,12 @@ mod tests {
     }
 
     struct BufferWriter {
-        buffer: Vec<u8, 1024>,
+        buffer: heapless::Vec<u8, 1024>,
     }
 
     impl BufferWriter {
         fn new() -> Self {
-            let buffer: Vec<u8, 1024> = Vec::new();
+            let buffer: heapless::Vec<u8, 1024> = heapless::Vec::new();
             Self { buffer }
         }
     }

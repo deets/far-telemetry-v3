@@ -6,12 +6,9 @@ use rq2_telemetry_parser::{
     Error as CommandError, IncomingDataProcessor, Module, Request, SelfContainedFrameParser,
     SpreadingFactor, Write,
 };
-use std::time::Duration;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 
-use tokio_serial::{
-    available_ports, SerialPortBuilderExt, SerialPortInfo, SerialPortType::UsbPort, SerialStream,
-};
+use tokio_serial::{available_ports, SerialPortBuilderExt, SerialPortType::UsbPort, SerialStream};
 use tracing::{debug, error};
 
 #[derive(Parser)]
@@ -50,14 +47,12 @@ struct TestDataProcessor {
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
-enum TestDataProcessorError {
-    SerialError,
-}
+enum TestDataProcessorError {}
 
 impl DataProcessor for TestDataProcessor {
     type Error = TestDataProcessorError;
 
-    fn process_data<'a>(&mut self, source: Module, data: &'a [u8]) -> Result<(), Self::Error> {
+    fn process_data<'a>(&mut self, _source: Module, data: &'a [u8]) -> Result<(), Self::Error> {
         let mut data_vec = std::vec![];
         data_vec.extend_from_slice(data);
         self.data.push(data_vec);
