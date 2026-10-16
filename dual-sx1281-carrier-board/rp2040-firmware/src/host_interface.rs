@@ -6,8 +6,8 @@ use embassy_rp::{
 use heapless::Vec;
 use postcard::to_vec;
 use rq2_telemetry_parser::{
-    encode_frame, seven_bit_encode, Command, FrameError, FrameProcessor, FrameResult,
-    IncomingDataProcessor, Payload, Request, Response, SelfContainedFrameParser,
+    encode_frame, seven_bit_encode, Command, FeedIncomingData, FrameError, FrameProcessor,
+    FrameResult, IncomingDataProcessor, Payload, Request, Response, SelfContainedFrameParser,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq)]

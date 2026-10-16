@@ -1,10 +1,15 @@
+use std::time::Duration;
+
 use clap::{Parser, Subcommand};
 use postcard::to_vec;
 use rq2_telemetry_parser::{
     Command, CommandProcessor, DataProcessor, EncodedFrameWriter, FeedIncomingData,
     IncomingDataProcessor, Module, Request, ResponseProcessor, SelfContainedFrameParser, Write,
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    time::timeout,
+};
 
 use tokio_serial::{available_ports, SerialPortBuilderExt, SerialPortType::UsbPort, SerialStream};
 use tracing::{debug, error};
@@ -87,25 +92,35 @@ async fn receive_command(
 ) -> eyre::Result<()> {
     loop {
         let mut buffer = [0; 1];
-        port.read(&mut buffer).await?;
-        match incoming_processor
-            .feed(buffer[0])
-            .await
-            .map_err(|e| eyre::eyre!("dispatch error: {:#?}", e))?
-        {
-            Some(response) => {
-                let response = command_processor
-                    .process_response_or_timeout(Some(response))
+        match timeout(Duration::from_millis(100), port.read(&mut buffer)).await {
+            Ok(_) => {
+                match incoming_processor
+                    .feed(buffer[0])
+                    .await
+                    .map_err(|e| eyre::eyre!("dispatch error: {:#?}", e))?
+                {
+                    Some(response) => {
+                        let response = command_processor
+                            .process_response_or_timeout(Some(response))
+                            .await
+                            .map_err(|e| eyre::eyre!("response processing error: {:#?}", e))?;
+                        println!("{:#?}", response);
+                        break;
+                    }
+                    None => {}
+                }
+            }
+            Err(_) => {
+                let _ = command_processor
+                    .process_response_or_timeout(None)
                     .await
                     .map_err(|e| eyre::eyre!("response processing error: {:#?}", e))?;
-                println!("{:#?}", response);
-                break;
             }
-            None => {}
         }
     }
     Ok(())
 }
+
 async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
     debug!("serial_port: {serial_port}");
     let mut port = tokio_serial::new(serial_port, args.serial_speed).open_native_async()?;
