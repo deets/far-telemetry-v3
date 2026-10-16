@@ -140,7 +140,7 @@ impl<E> From<postcard::Error> for Error<E> {
 #[derive(Debug, Eq, PartialEq)]
 pub enum ResponseProcessorResult {
     Nothing,
-    DataProcessd,
+    DataProcessed,
     Response(Response),
 }
 
@@ -149,7 +149,7 @@ pub trait ResponseProcessor {
 
     /// Process a received response. Must be called
     /// regularly with None to check for a timeout.
-    fn process_response_or_timeout<'a>(
+    async fn process_response_or_timeout<'a>(
         &mut self,
         command: Option<Command<'a>>,
     ) -> Result<ResponseProcessorResult, Self::Error>;
@@ -222,7 +222,7 @@ impl<'dp, E, DP: DataProcessor<Error = E>> CommandProcessor<'dp, E, DP> {
         &mut self,
         destination: Module,
         request: Request,
-    ) -> Result<Command, Error<E>> {
+    ) -> Result<Command<'_>, Error<E>> {
         let command_id = self.next_command_id();
         self.expected = Some(Expectation {
             command_id,
@@ -247,7 +247,7 @@ const RESPONSE_EXPECTATION_TIMEOUT: Duration = Duration::from_secs(1);
 impl<E, DP: DataProcessor<Error = E>> ResponseProcessor for CommandProcessor<'_, E, DP> {
     type Error = Error<E>;
 
-    fn process_response_or_timeout<'a>(
+    async fn process_response_or_timeout<'a>(
         &mut self,
         command: Option<Command<'a>>,
     ) -> Result<ResponseProcessorResult, Self::Error> {
@@ -257,7 +257,7 @@ impl<E, DP: DataProcessor<Error = E>> ResponseProcessor for CommandProcessor<'_,
                     self.data_processor
                         .process_data(command.destination, data)
                         .map_err(Error::DataProcessingError)?;
-                    Ok(ResponseProcessorResult::DataProcessd)
+                    Ok(ResponseProcessorResult::DataProcessed)
                 }
                 Payload::Request {
                     command_id,
@@ -350,21 +350,20 @@ where
         }
     }
 
-    pub async fn feed(&mut self, data: u8) -> Result<(), DispatcherError<E>> {
+    pub async fn feed(&mut self, data: u8) -> Result<ResponseProcessorResult, DispatcherError<E>> {
         let frame_result = self.frame_parser.feed(data);
         let mut frame_copy = [0; 128];
         match frame_result {
             Ok(FrameResult::Frame(frame)) => {
                 frame_copy[0..frame.len()].copy_from_slice(frame);
-                self.process_frame(&frame_copy)?;
+                self.process_frame(&frame_copy).await
             }
-            Ok(Nothing) => {}
+            Ok(Nothing) => Ok(ResponseProcessorResult::Nothing),
             Err(frame_error) => return Err(DispatcherError::FrameError(frame_error)),
-        };
-        Ok(())
+        }
     }
 
-    fn process_frame(
+    async fn process_frame(
         &mut self,
         frame: &[u8],
     ) -> Result<ResponseProcessorResult, DispatcherError<E>> {
@@ -373,6 +372,7 @@ where
         let command: Command = from_bytes(decoded).map_err(DispatcherError::PostcardError)?;
         self.processor
             .process_response_or_timeout(Some(command))
+            .await
             .map_err(DispatcherError::ResponseError)
     }
 }
@@ -444,26 +444,25 @@ mod tests {
     impl ResponseProcessor for TestResponseProcessor {
         type Error = TestResponseProcessorError;
 
-        fn process_response_or_timeout<'a>(
+        async fn process_response_or_timeout<'a>(
             &mut self,
             command: Option<Command<'a>>,
         ) -> Result<ResponseProcessorResult, Self::Error> {
             let command = command.unwrap();
             match command.payload {
-                Payload::Data(items) => return Ok(ResponseProcessorResult::DataProcessd),
+                Payload::Data(_items) => return Ok(ResponseProcessorResult::DataProcessed),
                 Payload::Request {
-                    command_id,
-                    request,
+                    command_id: _,
+                    request: _,
                 } => todo!(),
                 Payload::Response {
-                    command_id,
+                    command_id: _,
                     response,
                 } => {
                     self.count += 1;
                     return Ok(ResponseProcessorResult::Response(response));
                 }
             };
-            Err(TestResponseProcessorError::NothingWorks)
         }
     }
 
@@ -560,7 +559,7 @@ mod tests {
     impl DataProcessor for TestDataProcessor {
         type Error = TestDataProcessorError;
 
-        fn process_data<'a>(&mut self, source: Module, data: &'a [u8]) -> Result<(), Self::Error> {
+        fn process_data<'a>(&mut self, _source: Module, data: &'a [u8]) -> Result<(), Self::Error> {
             let mut data_vec = std::vec![];
             data_vec.extend_from_slice(data);
             self.data.push(data_vec);
@@ -607,7 +606,9 @@ mod tests {
             },
         };
         assert_eq!(
-            command_processor.process_response_or_timeout(Some(response)),
+            command_processor
+                .process_response_or_timeout(Some(response))
+                .await,
             Ok(ResponseProcessorResult::Response(Response::Ack))
         );
     }
@@ -625,7 +626,7 @@ mod tests {
         assert!(command_processor.send(Module::Lora1, request).await.is_ok());
         MockClock::advance(Duration::from_secs(15));
         assert_eq!(
-            command_processor.process_response_or_timeout(None),
+            command_processor.process_response_or_timeout(None).await,
             Err(Error::Timeout)
         );
         let response = Command {
@@ -637,7 +638,9 @@ mod tests {
         };
         // Ensure we are removing the expectation after a timout
         assert_eq!(
-            command_processor.process_response_or_timeout(Some(response)),
+            command_processor
+                .process_response_or_timeout(Some(response))
+                .await,
             Err(Error::NoResponseExpected)
         );
     }
@@ -658,8 +661,10 @@ mod tests {
             payload: Payload::Data(b"DIEZ WAS HERE"),
         };
         assert_eq!(
-            command_processor.process_response_or_timeout(Some(response)),
-            Ok(ResponseProcessorResult::DataProcessd)
+            command_processor
+                .process_response_or_timeout(Some(response))
+                .await,
+            Ok(ResponseProcessorResult::DataProcessed)
         );
     }
 }

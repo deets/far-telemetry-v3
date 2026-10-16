@@ -66,7 +66,7 @@ pub async fn uart_task(uart: Uart<'static, UART0, Async>) {
             Ok(_) => {
                 info!("{}", buffer[0]);
                 match dispatcher.feed(buffer[0]).await {
-                    Ok(_) => {
+                    Ok(response) => {
                         info!("all good");
                     }
                     Err(e) => error!("Got error: {:?}", defmt::Debug2Format(&e)),
