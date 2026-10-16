@@ -1,5 +1,3 @@
-use core::marker::PhantomData;
-
 use crate::encode_frame;
 use crate::seven_bit_decode;
 use crate::seven_bit_encode;
@@ -8,6 +6,8 @@ use crate::FrameProcessor;
 use crate::FrameResult;
 use crate::FrameResult::Nothing;
 use crate::SevenBitTranscoderError;
+use core::future::Future;
+use core::marker::PhantomData;
 
 #[cfg(test)]
 use core::time::Duration;
@@ -150,7 +150,7 @@ pub trait DataProcessor {
 ///  - A timeout can occur and means an error state for
 ///    which higher levels are responsible, it's not the job
 ///    of CommandProcessor to deal with this e.g. by retries.
-pub struct CommandProcessor<'a, E, DP: DataProcessor<Error = E>> {
+pub struct CommandProcessor<'a, E: Send, DP: DataProcessor<Error = E> + Send> {
     command_id: u8,
     expected: Option<Expectation<E>>,
     data_processor: &'a mut DP,
@@ -183,7 +183,16 @@ struct Expectation<E> {
 
 const RESPONSE_EXPECTATION_TIMEOUT: Duration = Duration::from_secs(1);
 
-impl<'dp, E, DP: DataProcessor<Error = E>> CommandProcessor<'dp, E, DP> {
+/// A trait that simplifies passing CommandProcessor instances
+/// around as reference.
+pub trait ResponseProcessor<E> {
+    fn process_response_or_timeout<'a>(
+        &mut self,
+        command: Option<Command<'a>>,
+    ) -> impl Future<Output = Result<Option<Response>, Error<E>>> + Send;
+}
+
+impl<'dp, E: Send, DP: DataProcessor<Error = E> + Send> CommandProcessor<'dp, E, DP> {
     /// Takes a data_processor to deal with Command::Data and returns Self
     pub fn new(data_processor: &'dp mut DP) -> Self {
         Self {
@@ -199,7 +208,7 @@ impl<'dp, E, DP: DataProcessor<Error = E>> CommandProcessor<'dp, E, DP> {
         res
     }
 
-    pub async fn send(
+    pub async fn create_and_expect_command(
         &mut self,
         destination: Module,
         request: Request,
@@ -221,8 +230,12 @@ impl<'dp, E, DP: DataProcessor<Error = E>> CommandProcessor<'dp, E, DP> {
             },
         })
     }
+}
 
-    pub async fn process_response_or_timeout<'a>(
+impl<'dp, E: Send, DP: DataProcessor<Error = E> + Send> ResponseProcessor<E>
+    for CommandProcessor<'dp, E, DP>
+{
+    async fn process_response_or_timeout<'a>(
         &mut self,
         command: Option<Command<'a>>,
     ) -> Result<Option<Response>, Error<E>> {
@@ -307,32 +320,26 @@ pub enum DispatcherError {
 /// Processing incoming bytes from uart according
 /// to both our framing and 7-bit encoding to
 /// yield Commands.
-pub struct IncomingDataProcessor<'a, FP: FrameProcessor> {
+pub struct IncomingDataProcessor<'a, FP: FrameProcessor + Send> {
     frame_parser: &'a mut FP,
     working: [u8; 128],
 }
 
+pub trait FeedIncomingData {
+    fn feed(
+        &mut self,
+        data: u8,
+    ) -> impl Future<Output = Result<Option<Command<'_>>, DispatcherError>> + Send;
+}
+
 impl<'a, FP> IncomingDataProcessor<'a, FP>
 where
-    FP: FrameProcessor,
+    FP: FrameProcessor + Send,
 {
     pub fn new(frame_parser: &'a mut FP) -> Self {
         Self {
             frame_parser,
             working: [0; 128],
-        }
-    }
-
-    pub async fn feed(&mut self, data: u8) -> Result<Option<Command<'_>>, DispatcherError> {
-        let frame_result = self.frame_parser.feed(data);
-        let mut frame_copy = [0; 128];
-        match frame_result {
-            Ok(FrameResult::Frame(frame)) => {
-                frame_copy[0..frame.len()].copy_from_slice(frame);
-                self.process_frame(&frame_copy).await
-            }
-            Ok(Nothing) => Ok(None),
-            Err(frame_error) => return Err(DispatcherError::FrameError(frame_error)),
         }
     }
 
@@ -345,6 +352,24 @@ where
         Ok(Some(
             from_bytes(decoded).map_err(DispatcherError::PostcardError)?,
         ))
+    }
+}
+
+impl<'a, FP> FeedIncomingData for IncomingDataProcessor<'a, FP>
+where
+    FP: FrameProcessor + Send,
+{
+    async fn feed(&mut self, data: u8) -> Result<Option<Command<'_>>, DispatcherError> {
+        let frame_result = self.frame_parser.feed(data);
+        let mut frame_copy = [0; 128];
+        match frame_result {
+            Ok(FrameResult::Frame(frame)) => {
+                frame_copy[0..frame.len()].copy_from_slice(frame);
+                self.process_frame(&frame_copy).await
+            }
+            Ok(Nothing) => Ok(None),
+            Err(frame_error) => return Err(DispatcherError::FrameError(frame_error)),
+        }
     }
 }
 
@@ -527,7 +552,9 @@ mod tests {
             frequency: 2450,
         };
         assert_eq!(
-            command_processor.send(Module::Lora1, request).await,
+            command_processor
+                .create_and_expect_command(Module::Lora1, request)
+                .await,
             Ok(Command {
                 destination: Module::Lora1,
                 payload: Payload::Request {
@@ -561,7 +588,10 @@ mod tests {
             coding_rate: CodingRate::_4_8,
             frequency: 2450,
         };
-        assert!(command_processor.send(Module::Lora1, request).await.is_ok());
+        assert!(command_processor
+            .create_and_expect_command(Module::Lora1, request)
+            .await
+            .is_ok());
         MockClock::advance(Duration::from_secs(15));
         assert_eq!(
             command_processor.process_response_or_timeout(None).await,
@@ -593,7 +623,10 @@ mod tests {
             coding_rate: CodingRate::_4_8,
             frequency: 2450,
         };
-        assert!(command_processor.send(Module::Lora1, request).await.is_ok());
+        assert!(command_processor
+            .create_and_expect_command(Module::Lora1, request)
+            .await
+            .is_ok());
         let response = Command {
             destination: Module::Lora1,
             payload: Payload::Data(b"DIEZ WAS HERE"),

@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 use postcard::to_vec;
 use rq2_telemetry_parser::{
-    Command, CommandProcessor, DataProcessor, EncodedFrameWriter, IncomingDataProcessor, Module,
-    Request, SelfContainedFrameParser, Write,
+    Command, CommandProcessor, DataProcessor, EncodedFrameWriter, FeedIncomingData,
+    IncomingDataProcessor, Module, Request, ResponseProcessor, SelfContainedFrameParser, Write,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -80,21 +80,11 @@ async fn send_command(port: &mut SerialStream, command: Command<'_>) -> eyre::Re
         .map_err(|_| eyre::eyre!("Can't write data!"))
 }
 
-async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
-    debug!("serial_port: {serial_port}");
-    let mut port = tokio_serial::new(serial_port, args.serial_speed).open_native_async()?;
-    let mut parser = SelfContainedFrameParser::new();
-    let mut tdp = TestDataProcessor::default();
-    let mut processor = CommandProcessor::new(&mut tdp);
-    let mut incoming_processor = IncomingDataProcessor::new(&mut parser);
-    let request = Request::Ping;
-
-    let command = processor
-        .send(Module::Lora1, request)
-        .await
-        .map_err(|_| eyre::eyre!("Can't process request!"))?;
-    send_command(&mut port, command).await?;
-
+async fn receive_command(
+    port: &mut SerialStream,
+    incoming_processor: &mut impl FeedIncomingData,
+    command_processor: &mut impl ResponseProcessor<TestDataProcessorError>,
+) -> eyre::Result<()> {
     loop {
         let mut buffer = [0; 1];
         port.read(&mut buffer).await?;
@@ -104,7 +94,7 @@ async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
             .map_err(|e| eyre::eyre!("dispatch error: {:#?}", e))?
         {
             Some(response) => {
-                let response = processor
+                let response = command_processor
                     .process_response_or_timeout(Some(response))
                     .await
                     .map_err(|e| eyre::eyre!("response processing error: {:#?}", e))?;
@@ -115,6 +105,22 @@ async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
         }
     }
     Ok(())
+}
+async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
+    debug!("serial_port: {serial_port}");
+    let mut port = tokio_serial::new(serial_port, args.serial_speed).open_native_async()?;
+    let mut parser = SelfContainedFrameParser::new();
+    let mut tdp = TestDataProcessor::default();
+    let mut command_processor = CommandProcessor::new(&mut tdp);
+    let mut incoming_processor = IncomingDataProcessor::new(&mut parser);
+    let request = Request::Ping;
+
+    let command = command_processor
+        .create_and_expect_command(Module::Lora1, request)
+        .await
+        .map_err(|_| eyre::eyre!("Can't process request!"))?;
+    send_command(&mut port, command).await?;
+    receive_command(&mut port, &mut incoming_processor, &mut command_processor).await
 }
 
 #[tokio::main(flavor = "current_thread")]
