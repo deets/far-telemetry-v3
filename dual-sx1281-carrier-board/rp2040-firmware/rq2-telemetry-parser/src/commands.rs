@@ -222,8 +222,7 @@ impl<'dp, E, DP: DataProcessor<Error = E>> CommandProcessor<'dp, E, DP> {
         &mut self,
         destination: Module,
         request: Request,
-        writer: &mut impl Write<Error = Error<E>>,
-    ) -> Result<(), Error<E>> {
+    ) -> Result<Command, Error<E>> {
         let command_id = self.next_command_id();
         self.expected = Some(Expectation {
             command_id,
@@ -233,15 +232,13 @@ impl<'dp, E, DP: DataProcessor<Error = E>> CommandProcessor<'dp, E, DP> {
             phantom_data: PhantomData,
         });
 
-        let command = Command {
+        Ok(Command {
             destination,
             payload: Payload::Request {
                 command_id,
                 request,
             },
-        };
-        let mut buffer: Vec<u8, 128> = to_vec(&command)?;
-        writer.write(&buffer).await
+        })
     }
 }
 
@@ -586,17 +583,22 @@ mod tests {
     async fn command_processor_send_test() {
         let mut tdp = TestDataProcessor { data: std::vec![] };
         let mut command_processor = CommandProcessor::new(&mut tdp);
-        let mut writer = BufferWriter::new();
         let request = Request::Configure {
             bandwidth: Bandwidth::_400KHz,
             spreading_factor: SpreadingFactor::_12,
             coding_rate: CodingRate::_4_8,
             frequency: 2450,
         };
-        assert!(command_processor
-            .send(Module::Lora1, request, &mut writer)
-            .await
-            .is_ok());
+        assert_eq!(
+            command_processor.send(Module::Lora1, request).await,
+            Ok(Command {
+                destination: Module::Lora1,
+                payload: Payload::Request {
+                    command_id: 1,
+                    request
+                }
+            })
+        );
         let response = Command {
             destination: Module::Lora1,
             payload: Payload::Response {
@@ -614,17 +616,13 @@ mod tests {
     async fn command_processor_send_with_timeout() {
         let mut tdp = TestDataProcessor { data: std::vec![] };
         let mut command_processor = CommandProcessor::new(&mut tdp);
-        let mut writer = BufferWriter::new();
         let request = Request::Configure {
             bandwidth: Bandwidth::_400KHz,
             spreading_factor: SpreadingFactor::_12,
             coding_rate: CodingRate::_4_8,
             frequency: 2450,
         };
-        assert!(command_processor
-            .send(Module::Lora1, request, &mut writer)
-            .await
-            .is_ok());
+        assert!(command_processor.send(Module::Lora1, request).await.is_ok());
         MockClock::advance(Duration::from_secs(15));
         assert_eq!(
             command_processor.process_response_or_timeout(None),
@@ -648,17 +646,13 @@ mod tests {
     async fn command_processor_send_data() {
         let mut tdp = TestDataProcessor { data: std::vec![] };
         let mut command_processor = CommandProcessor::new(&mut tdp);
-        let mut writer = BufferWriter::new();
         let request = Request::Configure {
             bandwidth: Bandwidth::_400KHz,
             spreading_factor: SpreadingFactor::_12,
             coding_rate: CodingRate::_4_8,
             frequency: 2450,
         };
-        assert!(command_processor
-            .send(Module::Lora1, request, &mut writer)
-            .await
-            .is_ok());
+        assert!(command_processor.send(Module::Lora1, request).await.is_ok());
         let response = Command {
             destination: Module::Lora1,
             payload: Payload::Data(b"DIEZ WAS HERE"),

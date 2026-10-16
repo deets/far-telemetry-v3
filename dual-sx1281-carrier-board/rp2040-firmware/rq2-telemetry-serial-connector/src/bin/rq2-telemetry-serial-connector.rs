@@ -1,15 +1,16 @@
-use std::time::Duration;
-
 use clap::{Parser, Subcommand};
 use eyre::bail;
+use postcard::to_vec;
 use rq2_telemetry_parser::{
     Bandwidth, CodingRate, CommandProcessor, DataProcessor, EncodedFrameWriter,
     Error as CommandError, IncomingDataDispatcher, Module, Request, SelfContainedFrameParser,
     SpreadingFactor, Write,
 };
+use std::time::Duration;
+use tokio::io::{self, AsyncWriteExt};
 
 use tokio_serial::{
-    available_ports, SerialPort, SerialPortBuilderExt, SerialPortInfo, SerialPortType::UsbPort,
+    available_ports, SerialPortBuilderExt, SerialPortInfo, SerialPortType::UsbPort, SerialStream,
 };
 use tracing::{debug, error};
 
@@ -64,18 +65,15 @@ impl DataProcessor for TestDataProcessor {
     }
 }
 
-struct WriteHelper<'a> {
-    port: &'a mut dyn SerialPort,
+struct SerialPortWriteHelper<'a> {
+    port: &'a mut SerialStream,
 }
 
-impl Write for WriteHelper<'_> {
-    type Error = CommandError<TestDataProcessorError>;
+impl Write for SerialPortWriteHelper<'_> {
+    type Error = std::io::Error;
 
     async fn write(&mut self, buffer: &[u8]) -> Result<(), Self::Error> {
-        self.port
-            .write_all(buffer)
-            .map_err(|_| CommandError::DataProcessingError(TestDataProcessorError::SerialError))?;
-        Ok(())
+        self.port.write_all(buffer).await
     }
 }
 
@@ -89,12 +87,17 @@ async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
     let mut tdp = TestDataProcessor { data: std::vec![] };
 
     let request = Request::Ping;
-    let mut write_helper = WriteHelper { port: &mut port };
+    let mut write_helper = SerialPortWriteHelper { port: &mut port };
     let mut encoded_writer = EncodedFrameWriter::new(&mut write_helper);
-    processor
-        .send(Module::Lora1, request, &mut write_helper)
+    let command = processor
+        .send(Module::Lora1, request)
         .await
-        .map_err(|_| eyre::eyre!("Can't send data!"))?;
+        .map_err(|_| eyre::eyre!("Can't process request!"))?;
+    let output: heapless::Vec<u8, 256> = to_vec(&command).unwrap();
+    encoded_writer
+        .write(&output)
+        .await
+        .map_err(|_| eyre::eyre!("Can't write data!"))?;
     tokio::time::sleep(Duration::from_secs(2)).await;
     Ok(())
 }
