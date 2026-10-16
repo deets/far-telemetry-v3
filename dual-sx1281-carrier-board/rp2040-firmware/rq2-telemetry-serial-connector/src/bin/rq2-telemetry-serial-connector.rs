@@ -3,7 +3,7 @@ use eyre::bail;
 use postcard::to_vec;
 use rq2_telemetry_parser::{
     Bandwidth, CodingRate, CommandProcessor, DataProcessor, EncodedFrameWriter,
-    Error as CommandError, IncomingDataDispatcher, Module, Request, SelfContainedFrameParser,
+    Error as CommandError, IncomingDataProcessor, Module, Request, SelfContainedFrameParser,
     SpreadingFactor, Write,
 };
 use std::time::Duration;
@@ -83,9 +83,7 @@ async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
     let mut parser = SelfContainedFrameParser::new();
     let mut tdp = TestDataProcessor::default();
     let mut processor = CommandProcessor::new(&mut tdp);
-    let mut dispatcher = IncomingDataDispatcher::new(&mut processor, &mut parser);
-    let mut tdp = TestDataProcessor { data: std::vec![] };
-
+    let mut dispatcher = IncomingDataProcessor::new(&mut parser);
     let request = Request::Ping;
     let mut write_helper = SerialPortWriteHelper { port: &mut port };
     let mut encoded_writer = EncodedFrameWriter::new(&mut write_helper);
@@ -98,6 +96,7 @@ async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
         .write(&output)
         .await
         .map_err(|_| eyre::eyre!("Can't write data!"))?;
+
     tokio::time::sleep(Duration::from_secs(2)).await;
     Ok(())
 }

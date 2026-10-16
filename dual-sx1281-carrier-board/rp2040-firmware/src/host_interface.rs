@@ -1,11 +1,13 @@
 use defmt::{debug, error, info};
 use embassy_rp::{
     peripherals::UART0,
-    uart::{Async, Uart},
+    uart::{Async, Uart, UartTx},
 };
+use heapless::Vec;
+use postcard::to_vec;
 use rq2_telemetry_parser::{
-    Command, FrameError, FrameProcessor, FrameResult, IncomingDataDispatcher, Payload, Request,
-    ResponseProcessor, ResponseProcessorResult, SelfContainedFrameParser,
+    encode_frame, seven_bit_encode, Command, FrameError, FrameProcessor, FrameResult,
+    IncomingDataProcessor, Payload, Request, Response, SelfContainedFrameParser,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -15,60 +17,67 @@ enum TestResponseProcessorError {
 
 struct TestResponseProcessor {}
 
-impl ResponseProcessor for TestResponseProcessor {
-    type Error = TestResponseProcessorError;
-
-    fn process_response_or_timeout<'a>(
-        &mut self,
-        command: Option<Command<'a>>,
-    ) -> Result<ResponseProcessorResult, Self::Error> {
-        let command = command.unwrap();
-        match command.payload {
-            Payload::Request {
-                command_id,
-                request,
-            } => match request {
-                Request::Ping => {
-                    info!("got ping!");
-                    return Ok(ResponseProcessorResult::Response(
-                        rq2_telemetry_parser::Response::Pong,
-                    ));
-                }
-                _ => todo!(),
-            },
-            _ => todo!(),
-        };
-        Err(TestResponseProcessorError::NothingWorks)
-    }
-}
-
 async fn process_incoming(result: Result<FrameResult<'_>, FrameError>) {
     match result {
         Ok(result) => match result {
             FrameResult::Nothing => {}
             FrameResult::Frame(data) => {
-                info!("got data: {:?}", data);
+                debug!("got data: {:?}", data);
             }
         },
         Err(FrameError::ShortFrame) => debug!("ignoring short frame"),
         Err(e) => error!("Got error: {:?}", defmt::Debug2Format(&e)),
     }
 }
+
+async fn send_response<'a>(uart: &mut UartTx<'static, UART0, Async>, response: Command<'a>) {
+    debug!("send_response::start");
+    let output: Vec<u8, 256> = to_vec(&response).expect("Can't transform to vec");
+    let mut encoded_buffer = [0; 127];
+    let mut seven_bit_buffer = [0; 127];
+    let encoded = seven_bit_encode(&mut encoded_buffer, &output).expect("Can't encode 7-bit");
+    let to_send = encode_frame(&mut seven_bit_buffer, encoded).expect("Can't generate frame");
+    uart.write(to_send).await.expect("Can't send response");
+    debug!("send_response::end");
+}
+
 pub async fn uart_task(uart: Uart<'static, UART0, Async>) {
     let mut parser = SelfContainedFrameParser::new();
-    let mut processor = TestResponseProcessor {};
-    let mut dispatcher = IncomingDataDispatcher::new(&mut processor, &mut parser);
+    let mut dispatcher = IncomingDataProcessor::new(&mut parser);
     let (mut outgoing, mut incoming) = uart.split();
     loop {
         let mut buffer = [0; 1];
-        info!("wait for incoming uart data");
+        debug!("wait for incoming uart data");
         match incoming.read(&mut buffer).await {
             Ok(_) => {
-                info!("{}", buffer[0]);
+                debug!("{}", buffer[0]);
                 match dispatcher.feed(buffer[0]).await {
-                    Ok(response) => {
-                        info!("all good");
-                    }
+                    Ok(Some(command)) => match command.payload {
+                        Payload::Data(items) => todo!(),
+                        Payload::Request {
+                            command_id,
+                            request,
+                        } => match request {
+                            Request::Ping => {
+                                info!("got ping, responding with pong");
+                                let response = Command {
+                                    destination: command.destination,
+                                    payload: Payload::Response {
+                                        command_id,
+                                        response: Response::Pong,
+                                    },
+                                };
+                                send_response(&mut outgoing, response).await;
+                            }
+                            Request::Status => todo!(),
+                            Request::Configure { .. } => todo!(),
+                        },
+                        Payload::Response {
+                            command_id,
+                            response,
+                        } => todo!(),
+                    },
+                    Ok(None) => {}
                     Err(e) => error!("Got error: {:?}", defmt::Debug2Format(&e)),
                 }
             }

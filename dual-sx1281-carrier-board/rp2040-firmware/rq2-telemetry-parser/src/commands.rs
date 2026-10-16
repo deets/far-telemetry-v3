@@ -137,24 +137,8 @@ impl<E> From<postcard::Error> for Error<E> {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
-pub enum ResponseProcessorResult {
-    Nothing,
-    DataProcessed,
-    Response(Response),
-}
-
-pub trait ResponseProcessor {
-    type Error;
-
-    /// Process a received response. Must be called
-    /// regularly with None to check for a timeout.
-    async fn process_response_or_timeout<'a>(
-        &mut self,
-        command: Option<Command<'a>>,
-    ) -> Result<ResponseProcessorResult, Self::Error>;
-}
-
+/// Incoming Commands can be requests/responses or data. This trait
+/// allows to process the latter from within a full Command processor.
 pub trait DataProcessor {
     type Error;
 
@@ -203,7 +187,10 @@ struct Expectation<E> {
     phantom_data: PhantomData<E>,
 }
 
+const RESPONSE_EXPECTATION_TIMEOUT: Duration = Duration::from_secs(1);
+
 impl<'dp, E, DP: DataProcessor<Error = E>> CommandProcessor<'dp, E, DP> {
+    /// Takes a data_processor to deal with Command::Data and returns Self
     pub fn new(data_processor: &'dp mut DP) -> Self {
         Self {
             command_id: 0,
@@ -240,24 +227,18 @@ impl<'dp, E, DP: DataProcessor<Error = E>> CommandProcessor<'dp, E, DP> {
             },
         })
     }
-}
-
-const RESPONSE_EXPECTATION_TIMEOUT: Duration = Duration::from_secs(1);
-
-impl<E, DP: DataProcessor<Error = E>> ResponseProcessor for CommandProcessor<'_, E, DP> {
-    type Error = Error<E>;
 
     async fn process_response_or_timeout<'a>(
         &mut self,
         command: Option<Command<'a>>,
-    ) -> Result<ResponseProcessorResult, Self::Error> {
+    ) -> Result<Option<Response>, Error<E>> {
         if let Some(command) = command {
             match command.payload {
                 Payload::Data(data) => {
                     self.data_processor
                         .process_data(command.destination, data)
                         .map_err(Error::DataProcessingError)?;
-                    Ok(ResponseProcessorResult::DataProcessed)
+                    Ok(None)
                 }
                 Payload::Request {
                     command_id,
@@ -274,22 +255,23 @@ impl<E, DP: DataProcessor<Error = E>> ResponseProcessor for CommandProcessor<'_,
                             response,
                         )?;
                         self.expected = None;
-                        Ok(ResponseProcessorResult::Response(response))
+                        Ok(Some(response))
                     } else {
                         Err(Error::NoResponseExpected)
                     }
                 }
             }
         } else {
+            // No incoming command, check for timeout
             if let Some(expectation) = &self.expected {
                 if expectation.when.elapsed() > RESPONSE_EXPECTATION_TIMEOUT {
                     self.expected = None;
                     Err(Error::Timeout)
                 } else {
-                    Ok(ResponseProcessorResult::Nothing)
+                    Ok(None)
                 }
             } else {
-                Ok(ResponseProcessorResult::Nothing)
+                Ok(None)
             }
         }
     }
@@ -321,36 +303,32 @@ impl<E> Expectation<E> {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum DispatcherError<E> {
+pub enum DispatcherError {
     FrameError(crate::FrameError),
     SevenBitEncodingError(crate::SevenBitTranscoderError),
     PostcardError(postcard::Error),
-    ResponseError(E),
 }
 
 /// Processing incoming bytes from uart according
 /// to both our framing and 7-bit encoding to
-/// yield Responses.
-pub struct IncomingDataDispatcher<'a, 'b, E, RP: ResponseProcessor<Error = E>, FP: FrameProcessor> {
-    processor: &'a mut RP,
-    frame_parser: &'b mut FP,
+/// yield Commands.
+pub struct IncomingDataProcessor<'a, FP: FrameProcessor> {
+    frame_parser: &'a mut FP,
     working: [u8; 128],
 }
 
-impl<'a, 'b, E, RP, FP> IncomingDataDispatcher<'a, 'b, E, RP, FP>
+impl<'a, FP> IncomingDataProcessor<'a, FP>
 where
-    RP: ResponseProcessor<Error = E>,
     FP: FrameProcessor,
 {
-    pub fn new(processor: &'a mut RP, frame_parser: &'b mut FP) -> Self {
+    pub fn new(frame_parser: &'a mut FP) -> Self {
         Self {
-            processor,
             frame_parser,
             working: [0; 128],
         }
     }
 
-    pub async fn feed(&mut self, data: u8) -> Result<ResponseProcessorResult, DispatcherError<E>> {
+    pub async fn feed(&mut self, data: u8) -> Result<Option<Command>, DispatcherError> {
         let frame_result = self.frame_parser.feed(data);
         let mut frame_copy = [0; 128];
         match frame_result {
@@ -358,22 +336,17 @@ where
                 frame_copy[0..frame.len()].copy_from_slice(frame);
                 self.process_frame(&frame_copy).await
             }
-            Ok(Nothing) => Ok(ResponseProcessorResult::Nothing),
+            Ok(Nothing) => Ok(None),
             Err(frame_error) => return Err(DispatcherError::FrameError(frame_error)),
         }
     }
 
-    async fn process_frame(
-        &mut self,
-        frame: &[u8],
-    ) -> Result<ResponseProcessorResult, DispatcherError<E>> {
+    async fn process_frame(&mut self, frame: &[u8]) -> Result<Option<Command>, DispatcherError> {
         let decoded = seven_bit_decode(&mut self.working, frame)
             .map_err(DispatcherError::SevenBitEncodingError)?;
-        let command: Command = from_bytes(decoded).map_err(DispatcherError::PostcardError)?;
-        self.processor
-            .process_response_or_timeout(Some(command))
-            .await
-            .map_err(DispatcherError::ResponseError)
+        Ok(Some(
+            from_bytes(decoded).map_err(DispatcherError::PostcardError)?,
+        ))
     }
 }
 
@@ -432,40 +405,6 @@ mod tests {
     extern crate std;
     extern crate tokio;
 
-    #[derive(Debug, Copy, Clone, PartialEq)]
-    enum TestResponseProcessorError {
-        NothingWorks,
-    }
-
-    struct TestResponseProcessor {
-        count: usize,
-    }
-
-    impl ResponseProcessor for TestResponseProcessor {
-        type Error = TestResponseProcessorError;
-
-        async fn process_response_or_timeout<'a>(
-            &mut self,
-            command: Option<Command<'a>>,
-        ) -> Result<ResponseProcessorResult, Self::Error> {
-            let command = command.unwrap();
-            match command.payload {
-                Payload::Data(_items) => return Ok(ResponseProcessorResult::DataProcessed),
-                Payload::Request {
-                    command_id: _,
-                    request: _,
-                } => todo!(),
-                Payload::Response {
-                    command_id: _,
-                    response,
-                } => {
-                    self.count += 1;
-                    return Ok(ResponseProcessorResult::Response(response));
-                }
-            };
-        }
-    }
-
     fn serialize_command<'a>(buffer: &'a mut [u8], command: &Command) -> &'a [u8] {
         let output: Vec<u8, 256> = to_vec(&command).unwrap();
         let mut encoded_buffer = [0; 127];
@@ -476,10 +415,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_incoming_data_dispatch() {
-        let mut processor = TestResponseProcessor { count: 0 };
         let mut parser = SelfContainedFrameParser::new();
-        let mut dispatcher = IncomingDataDispatcher::new(&mut processor, &mut parser);
-        let response = Command {
+        let mut dispatcher = IncomingDataProcessor::new(&mut parser);
+        let expected = Command {
             destination: Module::Lora1,
             payload: Payload::Response {
                 command_id: 1,
@@ -487,11 +425,12 @@ mod tests {
             },
         };
         let mut buffer = [0; 1024];
-        let data = serialize_command(&mut buffer, &response);
+        let data = serialize_command(&mut buffer, &expected);
+        let mut res = None;
         for c in data {
-            dispatcher.feed(*c).await.expect("Can't dispatch command");
+            res = dispatcher.feed(*c).await.expect("Can't dispatch command");
         }
-        assert_eq!(processor.count, 1);
+        assert_eq!(res, Some(expected));
     }
 
     #[test]
@@ -609,7 +548,7 @@ mod tests {
             command_processor
                 .process_response_or_timeout(Some(response))
                 .await,
-            Ok(ResponseProcessorResult::Response(Response::Ack))
+            Ok(Some(Response::Ack))
         );
     }
 
@@ -664,7 +603,7 @@ mod tests {
             command_processor
                 .process_response_or_timeout(Some(response))
                 .await,
-            Ok(ResponseProcessorResult::DataProcessed)
+            Ok(None),
         );
     }
 }
