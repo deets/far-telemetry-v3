@@ -33,11 +33,15 @@ async fn process_incoming(result: Result<FrameResult<'_>, FrameError>) {
 async fn send_response<'a>(uart: &mut UartTx<'static, UART0, Async>, response: Command<'a>) {
     debug!("send_response::start");
     let output: Vec<u8, 256> = to_vec(&response).expect("Can't transform to vec");
-    let mut encoded_buffer = [0; 127];
     let mut seven_bit_buffer = [0; 127];
-    let encoded = seven_bit_encode(&mut encoded_buffer, &output).expect("Can't encode 7-bit");
-    let to_send = encode_frame(&mut seven_bit_buffer, encoded).expect("Can't generate frame");
-    uart.write(to_send).await.expect("Can't send response");
+    let seven_bit_encoded =
+        seven_bit_encode(&mut seven_bit_buffer, &output).expect("Can't encode 7-bit");
+    let mut encoded_buffer = [0; 127];
+    let frame_encoded =
+        encode_frame(&mut encoded_buffer, seven_bit_encoded).expect("Can't generate frame");
+    uart.write(frame_encoded)
+        .await
+        .expect("Can't send response");
     debug!("send_response::end");
 }
 
