@@ -7,7 +7,7 @@ use rq2_telemetry_parser::{
     SpreadingFactor, Write,
 };
 use std::time::Duration;
-use tokio::io::{self, AsyncWriteExt};
+use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 
 use tokio_serial::{
     available_ports, SerialPortBuilderExt, SerialPortInfo, SerialPortType::UsbPort, SerialStream,
@@ -96,8 +96,27 @@ async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
         .write(&output)
         .await
         .map_err(|_| eyre::eyre!("Can't write data!"))?;
-
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    drop(encoded_writer);
+    drop(write_helper);
+    loop {
+        let mut buffer = [0; 1];
+        port.read(&mut buffer).await?;
+        match dispatcher
+            .feed(buffer[0])
+            .await
+            .map_err(|e| eyre::eyre!("dispatch error: {:#?}", e))?
+        {
+            Some(response) => {
+                let response = processor
+                    .process_response_or_timeout(Some(response))
+                    .await
+                    .map_err(|e| eyre::eyre!("response processing error: {:#?}", e))?;
+                println!("{:#?}", response);
+                break;
+            }
+            None => {}
+        }
+    }
     Ok(())
 }
 

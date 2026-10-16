@@ -228,7 +228,7 @@ impl<'dp, E, DP: DataProcessor<Error = E>> CommandProcessor<'dp, E, DP> {
         })
     }
 
-    async fn process_response_or_timeout<'a>(
+    pub async fn process_response_or_timeout<'a>(
         &mut self,
         command: Option<Command<'a>>,
     ) -> Result<Option<Response>, Error<E>> {
@@ -293,6 +293,7 @@ impl<E> Expectation<E> {
         if match (self.response_kind, response) {
             (ResponseKind::Status, Response::Status(_)) => true,
             (ResponseKind::Configure, Response::Ack) => true,
+            (ResponseKind::Pong, Response::Pong) => true,
             _ => false,
         } {
             Ok(())
