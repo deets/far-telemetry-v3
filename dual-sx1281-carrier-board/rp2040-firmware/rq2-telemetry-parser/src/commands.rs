@@ -99,6 +99,7 @@ pub enum Request {
         spreading_factor: SpreadingFactor,
         coding_rate: CodingRate,
         /// Given in Megahertz
+        /// TODO: there should be a data type for this
         frequency: usize,
     },
 }

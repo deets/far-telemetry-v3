@@ -120,7 +120,9 @@ async fn main(spawner: Spawner) {
     let lora2 = LoRa::new(Sx128x::new(lora2_spi, lora2_iv, lora2_config), false, Delay)
         .await
         .unwrap();
-    //spawner.spawn(receiver_task(lora2)).expect("Can't spawn receiver task");
+    spawner
+        .spawn(receiver_task(lora2))
+        .expect("Can't spawn receiver task");
     uart_task(uart).await;
 }
 
