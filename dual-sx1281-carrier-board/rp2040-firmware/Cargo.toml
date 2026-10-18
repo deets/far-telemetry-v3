@@ -14,7 +14,7 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 num-integer = { version = "0.1.47", default-features = false }
 embassy-time = { version = "0.4.0", features = ["defmt", "defmt-timestamp-uptime"] }
-heapless = "0.7.17"
+heapless = { version = "0.7.17", features = ["serde"]}
 postcard = "1.1.3"
 serde = { version = "1.0.229", default-features = false, features = ["derive"] }
 mock_instant = "0.6.1"

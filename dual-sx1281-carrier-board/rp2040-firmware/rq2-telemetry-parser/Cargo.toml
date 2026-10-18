@@ -9,7 +9,7 @@ use_std_time = []
 [dependencies]
 base64-ng = { version = "2.0.4", default-features = false }
 embassy-futures = "0.1.2"
-heapless.workspace = true   
+heapless.workspace = true
 postcard.workspace = true
 serde.workspace = true
 num-integer.workspace = true

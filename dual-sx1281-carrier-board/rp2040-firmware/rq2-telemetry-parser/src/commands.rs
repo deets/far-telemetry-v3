@@ -73,15 +73,14 @@ pub enum Module {
 /// A command sent or received from the telemetry
 /// module.
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
-pub struct Command<'a> {
+pub struct Command {
     pub destination: Module,
-    #[serde(borrow)]
-    pub payload: Payload<'a>,
+    pub payload: Payload,
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
-pub enum Payload<'a> {
-    Data(&'a [u8]),
+pub enum Payload {
+    Data(heapless::Vec<u8, 128>),
     Request { command_id: u8, request: Request },
     Response { command_id: u8, response: Response },
 }
@@ -187,9 +186,9 @@ const RESPONSE_EXPECTATION_TIMEOUT: Duration = Duration::from_secs(1);
 /// A trait that simplifies passing CommandProcessor instances
 /// around as reference.
 pub trait ResponseProcessor<E> {
-    fn process_response_or_timeout<'a>(
+    fn process_response_or_timeout(
         &mut self,
-        command: Option<Command<'a>>,
+        command: Option<Command>,
     ) -> impl Future<Output = Result<Option<Response>, Error<E>>> + Send;
 }
 
@@ -213,7 +212,7 @@ impl<'dp, E: Send, DP: DataProcessor<Error = E> + Send> CommandProcessor<'dp, E,
         &mut self,
         destination: Module,
         request: Request,
-    ) -> Result<Command<'_>, Error<E>> {
+    ) -> Result<Command, Error<E>> {
         let command_id = self.next_command_id();
         self.expected = Some(Expectation {
             command_id,
@@ -236,15 +235,15 @@ impl<'dp, E: Send, DP: DataProcessor<Error = E> + Send> CommandProcessor<'dp, E,
 impl<'dp, E: Send, DP: DataProcessor<Error = E> + Send> ResponseProcessor<E>
     for CommandProcessor<'dp, E, DP>
 {
-    async fn process_response_or_timeout<'a>(
+    async fn process_response_or_timeout(
         &mut self,
-        command: Option<Command<'a>>,
+        command: Option<Command>,
     ) -> Result<Option<Response>, Error<E>> {
         if let Some(command) = command {
             match command.payload {
                 Payload::Data(data) => {
                     self.data_processor
-                        .process_data(command.destination, data)
+                        .process_data(command.destination, &data)
                         .map_err(Error::DataProcessingError)?;
                     Ok(None)
                 }
@@ -330,7 +329,7 @@ pub trait FeedIncomingData {
     fn feed(
         &mut self,
         data: u8,
-    ) -> impl Future<Output = Result<Option<Command<'_>>, DispatcherError>> + Send;
+    ) -> impl Future<Output = Result<Option<Command>, DispatcherError>> + Send;
 }
 
 impl<'a, FP> IncomingDataProcessor<'a, FP>
@@ -344,10 +343,7 @@ where
         }
     }
 
-    async fn process_frame(
-        &mut self,
-        frame: &[u8],
-    ) -> Result<Option<Command<'_>>, DispatcherError> {
+    async fn process_frame(&mut self, frame: &[u8]) -> Result<Option<Command>, DispatcherError> {
         let decoded = seven_bit_decode(&mut self.working, frame)
             .map_err(DispatcherError::SevenBitEncodingError)?;
         Ok(Some(
@@ -360,7 +356,7 @@ impl<'a, FP> FeedIncomingData for IncomingDataProcessor<'a, FP>
 where
     FP: FrameProcessor + Send,
 {
-    async fn feed(&mut self, data: u8) -> Result<Option<Command<'_>>, DispatcherError> {
+    async fn feed(&mut self, data: u8) -> Result<Option<Command>, DispatcherError> {
         let frame_result = self.frame_parser.feed(data);
         let mut frame_copy = [0; 128];
         match frame_result {
@@ -460,10 +456,11 @@ mod tests {
 
     #[test]
     fn test_serialization() {
-        let data = b"DIEZ WAS HERE";
+        let mut data: heapless::Vec<u8, 128> = heapless::Vec::new();
+        data.extend_from_slice(b"DIEZ WAS HERE").unwrap();
         let command = Command {
             destination: Module::Lora1,
-            payload: Payload::Data(data.as_slice()),
+            payload: Payload::Data(data.clone()),
         };
         let output: heapless::Vec<u8, 256> = to_vec(&command).unwrap();
         std::println!(
@@ -628,9 +625,12 @@ mod tests {
             .create_and_expect_command(Module::Lora1, request)
             .await
             .is_ok());
+        let mut payload: heapless::Vec<u8, 128> = heapless::Vec::new();
+        payload.extend_from_slice(b"DIEZ WAS HERE").unwrap();
+
         let response = Command {
             destination: Module::Lora1,
-            payload: Payload::Data(b"DIEZ WAS HERE"),
+            payload: Payload::Data(payload),
         };
         assert_eq!(
             command_processor
