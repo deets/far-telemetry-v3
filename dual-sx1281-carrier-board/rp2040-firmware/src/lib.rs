@@ -1,6 +1,6 @@
 #![no_std]
 use embassy_rp::gpio::{Input, Output};
-use embassy_rp::peripherals::SPI1;
+use embassy_rp::peripherals::{SPI0, SPI1};
 use embassy_rp::spi::{Async, Spi};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::{Receiver, Sender};
@@ -119,24 +119,12 @@ async fn send_response(
     sender.send(response).await;
 }
 
-#[embassy_executor::task]
-pub async fn receiver_task(
-    mut lora2: LoRa<
-        Sx128x<
-            ExclusiveDevice<Spi<'static, SPI1, Async>, Output<'static>, Delay>,
-            GenericSx128xInterfaceVariant<Output<'static>, Input<'static>>,
-            Sx1281,
-        >,
-        Delay,
-    >,
+async fn lora_work<RK: RadioKind, DLY: DelayNs>(
+    mut manager: LoraManager<RK, DLY>,
+    destination: Module,
     receiver: Receiver<'static, NoopRawMutex, Command, 4>,
     mut sender: Sender<'static, NoopRawMutex, Command, 4>,
 ) {
-    let mut manager = LoraManager {
-        lora: lora2,
-        configuration: None,
-    };
-
     loop {
         let command = receiver.receive().await;
         match command.payload {
@@ -146,7 +134,7 @@ pub async fn receiver_task(
                 request,
             } => match request {
                 Request::Ping => {
-                    send_response(&mut sender, Module::Lora2, command_id, Response::Pong).await;
+                    send_response(&mut sender, destination, command_id, Response::Pong).await;
                 }
                 Request::Status => {
                     send_response(
@@ -176,50 +164,92 @@ pub async fn receiver_task(
             } => todo!(),
         }
     }
-    // let mdltn_params = {
-    //     match manager.create_modulation_params(
-    //         SpreadingFactor::_12,
-    //         Bandwidth::_400KHz,
-    //         CodingRate::_4_7,
-    //         LORA_FREQUENCY_IN_HZ,
-    //     ) {
-    //         Ok(mp) => mp,
-    //         Err(err) => {
-    //             info!("Radio error = {}", err);
-    //             return;
-    //         }
-    //     }
-    // };
-    // info!("modulation params set");
-    // let rx_pkt_params = {
-    //     match lora2.create_rx_packet_params(4, false, 255, true, false, &mdltn_params) {
-    //         Ok(pp) => pp,
-    //         Err(err) => {
-    //             info!("Radio error = {}", err);
-    //             return;
-    //         }
-    //     }
-    // };
-    // info!("transmission params set");
-
-    // let mut receiving_buffer = [00u8; 100];
-
-    // match lora2
-    //     .prepare_for_rx(RxMode::Continuous, &mdltn_params, &rx_pkt_params)
-    //     .await
-    // {
-    //     Ok(()) => {}
-    //     Err(err) => {
-    //         info!("Radio error = {}", err);
-    //         return;
-    //     }
-    // };
-    // loop {
-    //     match lora2.rx(&rx_pkt_params, &mut receiving_buffer).await {
-    //         Ok((received_len, _rx_pkt_status)) => {
-    //             error!("packet:{:?}", &receiving_buffer[0..received_len as usize]);
-    //         }
-    //         Err(err) => info!("rx unsuccessful = {}", err),
-    //     }
-    // }
 }
+
+#[embassy_executor::task]
+pub async fn lora1_task(
+    mut lora1: LoRa<
+        Sx128x<
+            ExclusiveDevice<Spi<'static, SPI0, Async>, Output<'static>, Delay>,
+            GenericSx128xInterfaceVariant<Output<'static>, Input<'static>>,
+            Sx1281,
+        >,
+        Delay,
+    >,
+    receiver: Receiver<'static, NoopRawMutex, Command, 4>,
+    mut sender: Sender<'static, NoopRawMutex, Command, 4>,
+) {
+    let manager = LoraManager {
+        lora: lora1,
+        configuration: None,
+    };
+    lora_work(manager, Module::Lora1, receiver, sender).await;
+}
+
+#[embassy_executor::task]
+pub async fn lora2_task(
+    mut lora2: LoRa<
+        Sx128x<
+            ExclusiveDevice<Spi<'static, SPI1, Async>, Output<'static>, Delay>,
+            GenericSx128xInterfaceVariant<Output<'static>, Input<'static>>,
+            Sx1281,
+        >,
+        Delay,
+    >,
+    receiver: Receiver<'static, NoopRawMutex, Command, 4>,
+    mut sender: Sender<'static, NoopRawMutex, Command, 4>,
+) {
+    let manager = LoraManager {
+        lora: lora2,
+        configuration: None,
+    };
+    lora_work(manager, Module::Lora2, receiver, sender).await;
+}
+
+// let mdltn_params = {
+//     match manager.create_modulation_params(
+//         SpreadingFactor::_12,
+//         Bandwidth::_400KHz,
+//         CodingRate::_4_7,
+//         LORA_FREQUENCY_IN_HZ,
+//     ) {
+//         Ok(mp) => mp,
+//         Err(err) => {
+//             info!("Radio error = {}", err);
+//             return;
+//         }
+//     }
+// };
+// info!("modulation params set");
+// let rx_pkt_params = {
+//     match lora2.create_rx_packet_params(4, false, 255, true, false, &mdltn_params) {
+//         Ok(pp) => pp,
+//         Err(err) => {
+//             info!("Radio error = {}", err);
+//             return;
+//         }
+//     }
+// };
+// info!("transmission params set");
+
+// let mut receiving_buffer = [00u8; 100];
+
+// match lora2
+//     .prepare_for_rx(RxMode::Continuous, &mdltn_params, &rx_pkt_params)
+//     .await
+// {
+//     Ok(()) => {}
+//     Err(err) => {
+//         info!("Radio error = {}", err);
+//         return;
+//     }
+// };
+// loop {
+//     match lora2.rx(&rx_pkt_params, &mut receiving_buffer).await {
+//         Ok((received_len, _rx_pkt_status)) => {
+//             error!("packet:{:?}", &receiving_buffer[0..received_len as usize]);
+//         }
+//         Err(err) => info!("rx unsuccessful = {}", err),
+//     }
+// }
+//}

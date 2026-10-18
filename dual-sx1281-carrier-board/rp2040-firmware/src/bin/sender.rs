@@ -20,7 +20,7 @@ use lora_phy::sx128x::{Sx1281, Sx128x};
 use lora_phy::LoRa;
 use lora_phy::{mod_params::*, sx128x};
 use rf_range_test::host_interface::uart_task;
-use rf_range_test::receiver_task;
+use rf_range_test::{lora1_task, lora2_task};
 use rq2_telemetry_parser::Command;
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
@@ -31,6 +31,8 @@ bind_interrupts!(struct Irqs {
 
 const LORA_FREQUENCY_IN_HZ: u32 = 2_450_000_000; // warning: set this appropriately for the region
 
+static LORA1_SEND_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
+static LORA1_RECEIVE_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
 static LORA2_SEND_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
 static LORA2_RECEIVE_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
 
@@ -88,7 +90,6 @@ async fn main(spawner: Spawner) {
         .await
         .unwrap();
     info!("Created lora1");
-    //spawner.spawn(sender_task(lora1)).expect("Can't spawn sender task");
 
     let lora2_nss = Output::new(p.PIN_13.degrade(), Level::High);
     let lora2_busy = Input::new(p.PIN_17.degrade(), Pull::None);
@@ -124,6 +125,11 @@ async fn main(spawner: Spawner) {
     .unwrap();
     info!("Created GenericSx128xInterfaceVariant");
 
+    let lora1_send_channel = Channel::<NoopRawMutex, Command, 4>::new();
+    let static_lora1_send_channel = LORA1_SEND_CHANNEL.init(lora1_send_channel);
+    let lora1_receive_channel = Channel::<NoopRawMutex, Command, 4>::new();
+    let static_lora1_receive_channel = LORA1_RECEIVE_CHANNEL.init(lora1_receive_channel);
+
     let lora2 = LoRa::new(Sx128x::new(lora2_spi, lora2_iv, lora2_config), false, Delay)
         .await
         .unwrap();
@@ -131,15 +137,27 @@ async fn main(spawner: Spawner) {
     let static_lora2_send_channel = LORA2_SEND_CHANNEL.init(lora2_send_channel);
     let lora2_receive_channel = Channel::<NoopRawMutex, Command, 4>::new();
     let static_lora2_receive_channel = LORA2_RECEIVE_CHANNEL.init(lora2_receive_channel);
+
     spawner
-        .spawn(receiver_task(
+        .spawn(lora1_task(
+            lora1,
+            static_lora1_send_channel.receiver(),
+            static_lora1_receive_channel.sender(),
+        ))
+        .expect("Can't spawn receiver task");
+
+    spawner
+        .spawn(lora2_task(
             lora2,
             static_lora2_send_channel.receiver(),
             static_lora2_receive_channel.sender(),
         ))
         .expect("Can't spawn receiver task");
+
     uart_task(
         uart,
+        static_lora1_send_channel.sender(),
+        static_lora1_receive_channel.receiver(),
         static_lora2_send_channel.sender(),
         static_lora2_receive_channel.receiver(),
     )

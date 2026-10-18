@@ -1,10 +1,10 @@
 use std::time::Duration;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use postcard::to_vec;
 use rq2_telemetry_parser::{
     Command, CommandProcessor, DataProcessor, EncodedFrameWriter, FeedIncomingData,
-    IncomingDataProcessor, Module, Request, ResponseProcessor, SelfContainedFrameParser, Write,
+    IncomingDataProcessor, Request, ResponseProcessor, SelfContainedFrameParser, Write,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -14,11 +14,29 @@ use tokio::{
 use tokio_serial::{available_ports, SerialPortBuilderExt, SerialPortType::UsbPort, SerialStream};
 use tracing::{debug, error};
 
+#[derive(ValueEnum, Debug, Eq, PartialEq, Copy, Clone)]
+pub enum Module {
+    Lora1,
+    Lora2,
+}
+
+impl From<Module> for rq2_telemetry_parser::Module {
+    fn from(value: Module) -> Self {
+        match value {
+            Module::Lora1 => rq2_telemetry_parser::Module::Lora1,
+            Module::Lora2 => rq2_telemetry_parser::Module::Lora2,
+        }
+    }
+}
+
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
     /// Port to open
     serial_port: Option<String>,
+    /// Module to refer to
+    #[arg(long)]
+    destination: Module,
     /// Speed
     #[arg(short, default_value_t = 115200)]
     serial_speed: u32,
@@ -55,7 +73,11 @@ enum TestDataProcessorError {}
 impl DataProcessor for TestDataProcessor {
     type Error = TestDataProcessorError;
 
-    fn process_data<'a>(&mut self, _source: Module, data: &'a [u8]) -> Result<(), Self::Error> {
+    fn process_data<'a>(
+        &mut self,
+        _source: rq2_telemetry_parser::Module,
+        data: &'a [u8],
+    ) -> Result<(), Self::Error> {
         let mut data_vec = std::vec![];
         data_vec.extend_from_slice(data);
         self.data.push(data_vec);
@@ -131,7 +153,7 @@ async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
     let request = Request::Ping;
 
     let command = command_processor
-        .create_and_expect_command(Module::Lora2, request)
+        .create_and_expect_command(args.destination.into(), request)
         .await
         .map_err(|_| eyre::eyre!("Can't process request!"))?;
     send_command(&mut port, command).await?;

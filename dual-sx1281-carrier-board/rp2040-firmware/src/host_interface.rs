@@ -49,6 +49,8 @@ async fn send_response<'a>(uart: &mut UartTx<'static, UART0, Async>, response: C
 
 pub async fn uart_task(
     uart: Uart<'static, UART0, Async>,
+    mut lora1_sender: Sender<'static, NoopRawMutex, Command, 4>,
+    lora1_receiver: Receiver<'static, NoopRawMutex, Command, 4>,
     mut lora2_sender: Sender<'static, NoopRawMutex, Command, 4>,
     lora2_receiver: Receiver<'static, NoopRawMutex, Command, 4>,
 ) {
@@ -63,7 +65,11 @@ pub async fn uart_task(
                 debug!("{}", buffer[0]);
                 match dispatcher.feed(buffer[0]).await {
                     Ok(Some(command)) => match command.destination {
-                        rq2_telemetry_parser::Module::Lora1 => todo!(),
+                        rq2_telemetry_parser::Module::Lora1 => {
+                            lora1_sender.send(command).await;
+                            let response = lora1_receiver.receive().await;
+                            send_response(&mut outgoing, response).await;
+                        }
                         rq2_telemetry_parser::Module::Lora2 => {
                             lora2_sender.send(command).await;
                             let response = lora2_receiver.receive().await;
