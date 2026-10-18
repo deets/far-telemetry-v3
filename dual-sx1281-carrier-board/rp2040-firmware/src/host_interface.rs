@@ -30,7 +30,7 @@ async fn process_incoming(result: Result<FrameResult<'_>, FrameError>) {
     }
 }
 
-async fn send_response<'a>(uart: &mut UartTx<'static, UART0, Async>, response: Command<'a>) {
+async fn send_response<'a>(uart: &mut UartTx<'static, UART0, Async>, response: Command) {
     debug!("send_response::start");
     let output: Vec<u8, 256> = to_vec(&response).expect("Can't transform to vec");
     let mut seven_bit_buffer = [0; 127];

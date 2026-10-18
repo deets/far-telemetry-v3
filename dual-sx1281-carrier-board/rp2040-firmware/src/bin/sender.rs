@@ -11,6 +11,8 @@ use embassy_rp::gpio::{Input, Level, Output, Pin, Pull};
 use embassy_rp::peripherals::{SPI0, UART0};
 use embassy_rp::spi::{Async, Config, Spi};
 use embassy_rp::uart::{Config as UartConfig, InterruptHandler, Uart};
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::channel::Channel;
 use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use lora_phy::iv::GenericSx128xInterfaceVariant;
@@ -19,6 +21,8 @@ use lora_phy::LoRa;
 use lora_phy::{mod_params::*, sx128x};
 use rf_range_test::host_interface::uart_task;
 use rf_range_test::receiver_task;
+use rq2_telemetry_parser::Command;
+use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
@@ -26,6 +30,9 @@ bind_interrupts!(struct Irqs {
 });
 
 const LORA_FREQUENCY_IN_HZ: u32 = 2_450_000_000; // warning: set this appropriately for the region
+
+static LORA2_SEND_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
+static LORA2_RECEIVE_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -120,10 +127,21 @@ async fn main(spawner: Spawner) {
     let lora2 = LoRa::new(Sx128x::new(lora2_spi, lora2_iv, lora2_config), false, Delay)
         .await
         .unwrap();
+    let lora2_send_channel = Channel::<NoopRawMutex, Command, 4>::new();
+    let static_lora2_send_channel = LORA2_SEND_CHANNEL.init(lora2_send_channel);
+    let lora2_receive_channel = Channel::<NoopRawMutex, Command, 4>::new();
+    let static_lora2_receive_channel = LORA2_RECEIVE_CHANNEL.init(lora2_receive_channel);
     spawner
-        .spawn(receiver_task(lora2))
+        .spawn(receiver_task(
+            lora2,
+            static_lora2_send_channel.receiver(),
+            static_lora2_receive_channel.sender(),
+        ))
         .expect("Can't spawn receiver task");
     uart_task(uart).await;
+    loop {
+        Timer::after_millis(10).await;
+    }
 }
 
 #[embassy_executor::task]

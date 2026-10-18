@@ -3,6 +3,8 @@ use defmt::*;
 use embassy_rp::gpio::{Input, Output};
 use embassy_rp::peripherals::SPI1;
 use embassy_rp::spi::{Async, Spi};
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::channel::{Receiver, Sender};
 use embassy_time::Delay;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use lora_phy::iv::GenericSx128xInterfaceVariant;
@@ -11,11 +13,45 @@ use lora_phy::mod_traits::RadioKind;
 use lora_phy::sx128x::{Sx1281, Sx128x};
 use lora_phy::DelayNs;
 use lora_phy::LoRa;
+use rq2_telemetry_parser::{Bandwidth, CodingRate, Command, Request, SpreadingFactor};
 use {defmt_rtt as _, panic_probe as _};
 
 pub mod host_interface;
 
 const LORA_FREQUENCY_IN_HZ: u32 = 2_450_000_000; // warning: set this appropriately for the region
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+enum Error {
+    ConfigurationError,
+}
+
+struct LoRaConfiguration {
+    bandwidth: Bandwidth,
+    spreading_factor: SpreadingFactor,
+    coding_rate: CodingRate,
+    frequency: usize,
+}
+
+impl TryFrom<Request> for LoRaConfiguration {
+    type Error = Error;
+
+    fn try_from(value: Request) -> Result<Self, Self::Error> {
+        match value {
+            Request::Configure {
+                bandwidth,
+                spreading_factor,
+                coding_rate,
+                frequency,
+            } => Ok(Self {
+                bandwidth,
+                spreading_factor,
+                coding_rate,
+                frequency,
+            }),
+            _ => Err(Error::ConfigurationError),
+        }
+    }
+}
 
 struct LoraManager<RK, DLY>
 where
@@ -23,6 +59,7 @@ where
     DLY: DelayNs,
 {
     lora: LoRa<RK, DLY>,
+    configuration: Option<LoRaConfiguration>,
 }
 
 impl<RK, DLY> LoraManager<RK, DLY>
@@ -30,19 +67,24 @@ where
     RK: RadioKind,
     DLY: DelayNs,
 {
-    pub fn create_modulation_params(
-        &mut self,
-        spreading_factor: SpreadingFactor,
-        bandwidth: Bandwidth,
-        coding_rate: CodingRate,
-        frequency_in_hz: u32,
-    ) -> Result<ModulationParams, RadioError> {
-        self.lora.create_modulation_params(
-            spreading_factor,
-            bandwidth,
-            coding_rate,
-            frequency_in_hz,
-        )
+    // fn create_modulation_params(
+    //     &mut self,
+    //     spreading_factor: SpreadingFactor,
+    //     bandwidth: Bandwidth,
+    //     coding_rate: CodingRate,
+    //     frequency_in_hz: u32,
+    // ) -> Result<ModulationParams, RadioError> {
+    //     self.lora.create_modulation_params(
+    //         spreading_factor,
+    //         bandwidth,
+    //         coding_rate,
+    //         frequency_in_hz,
+    //     )
+    // }
+
+    fn set_configuration(&mut self, request: Request) -> Result<(), Error> {
+        //self.configuration = Some(request.into()?);
+        Ok(())
     }
 }
 
@@ -56,22 +98,28 @@ pub async fn receiver_task(
         >,
         Delay,
     >,
+    receiver: Receiver<'static, NoopRawMutex, Command, 4>,
+    sender: Sender<'static, NoopRawMutex, Command, 4>,
 ) {
-    let mut manager = LoraManager { lora: lora2 };
-    let mdltn_params = {
-        match manager.create_modulation_params(
-            SpreadingFactor::_12,
-            Bandwidth::_400KHz,
-            CodingRate::_4_7,
-            LORA_FREQUENCY_IN_HZ,
-        ) {
-            Ok(mp) => mp,
-            Err(err) => {
-                info!("Radio error = {}", err);
-                return;
-            }
-        }
+    let mut manager = LoraManager {
+        lora: lora2,
+        configuration: None,
     };
+
+    // let mdltn_params = {
+    //     match manager.create_modulation_params(
+    //         SpreadingFactor::_12,
+    //         Bandwidth::_400KHz,
+    //         CodingRate::_4_7,
+    //         LORA_FREQUENCY_IN_HZ,
+    //     ) {
+    //         Ok(mp) => mp,
+    //         Err(err) => {
+    //             info!("Radio error = {}", err);
+    //             return;
+    //         }
+    //     }
+    // };
     // info!("modulation params set");
     // let rx_pkt_params = {
     //     match lora2.create_rx_packet_params(4, false, 255, true, false, &mdltn_params) {
