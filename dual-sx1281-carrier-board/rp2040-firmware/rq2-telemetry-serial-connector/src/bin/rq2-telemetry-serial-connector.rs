@@ -75,7 +75,7 @@ impl Write for SerialPortWriteHelper<'_> {
     }
 }
 
-async fn send_command(port: &mut SerialStream, command: Command<'_>) -> eyre::Result<()> {
+async fn send_command(port: &mut SerialStream, command: Command) -> eyre::Result<()> {
     let output: heapless::Vec<u8, 256> = to_vec(&command)?;
     let mut write_helper = SerialPortWriteHelper { port };
     let mut encoded_writer = EncodedFrameWriter::new(&mut write_helper);
@@ -131,7 +131,7 @@ async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
     let request = Request::Ping;
 
     let command = command_processor
-        .create_and_expect_command(Module::Lora1, request)
+        .create_and_expect_command(Module::Lora2, request)
         .await
         .map_err(|_| eyre::eyre!("Can't process request!"))?;
     send_command(&mut port, command).await?;

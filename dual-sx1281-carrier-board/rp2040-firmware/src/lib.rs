@@ -1,5 +1,4 @@
 #![no_std]
-use defmt::*;
 use embassy_rp::gpio::{Input, Output};
 use embassy_rp::peripherals::SPI1;
 use embassy_rp::spi::{Async, Spi};
@@ -13,7 +12,9 @@ use lora_phy::mod_traits::RadioKind;
 use lora_phy::sx128x::{Sx1281, Sx128x};
 use lora_phy::DelayNs;
 use lora_phy::LoRa;
-use rq2_telemetry_parser::{Bandwidth, CodingRate, Command, Request, SpreadingFactor};
+use rq2_telemetry_parser::{
+    Bandwidth, CodingRate, Command, ErrorCode, Mode, Module, Request, Response, SpreadingFactor,
+};
 use {defmt_rtt as _, panic_probe as _};
 
 pub mod host_interface;
@@ -88,6 +89,36 @@ where
     }
 }
 
+trait HasStatus {
+    fn status(&self) -> Mode;
+}
+
+impl<RK, DLY> HasStatus for LoraManager<RK, DLY>
+where
+    RK: RadioKind,
+    DLY: DelayNs,
+{
+    fn status(&self) -> Mode {
+        Mode::Idle
+    }
+}
+
+async fn send_response(
+    sender: &mut Sender<'static, NoopRawMutex, Command, 4>,
+    destination: rq2_telemetry_parser::Module,
+    command_id: u8,
+    response: Response,
+) {
+    let response = Command {
+        destination,
+        payload: rq2_telemetry_parser::Payload::Response {
+            command_id,
+            response,
+        },
+    };
+    sender.send(response).await;
+}
+
 #[embassy_executor::task]
 pub async fn receiver_task(
     mut lora2: LoRa<
@@ -99,13 +130,52 @@ pub async fn receiver_task(
         Delay,
     >,
     receiver: Receiver<'static, NoopRawMutex, Command, 4>,
-    sender: Sender<'static, NoopRawMutex, Command, 4>,
+    mut sender: Sender<'static, NoopRawMutex, Command, 4>,
 ) {
     let mut manager = LoraManager {
         lora: lora2,
         configuration: None,
     };
 
+    loop {
+        let command = receiver.receive().await;
+        match command.payload {
+            rq2_telemetry_parser::Payload::Data(items) => todo!(),
+            rq2_telemetry_parser::Payload::Request {
+                command_id,
+                request,
+            } => match request {
+                Request::Ping => {
+                    send_response(&mut sender, Module::Lora2, command_id, Response::Pong).await;
+                }
+                Request::Status => {
+                    send_response(
+                        &mut sender,
+                        Module::Lora2,
+                        command_id,
+                        Response::Status(manager.status()),
+                    )
+                    .await;
+                }
+                Request::Configure { .. } => {
+                    send_response(
+                        &mut sender,
+                        Module::Lora2,
+                        command_id,
+                        match manager.set_configuration(request) {
+                            Ok(_) => Response::Ack,
+                            Err(_) => Response::Error(ErrorCode::CantSetConfiguration),
+                        },
+                    )
+                    .await;
+                }
+            },
+            rq2_telemetry_parser::Payload::Response {
+                command_id,
+                response,
+            } => todo!(),
+        }
+    }
     // let mdltn_params = {
     //     match manager.create_modulation_params(
     //         SpreadingFactor::_12,

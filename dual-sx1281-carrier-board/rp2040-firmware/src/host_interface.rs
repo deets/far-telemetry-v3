@@ -3,6 +3,8 @@ use embassy_rp::{
     peripherals::UART0,
     uart::{Async, Uart, UartTx},
 };
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::channel::{Receiver, Sender};
 use heapless::Vec;
 use postcard::to_vec;
 use rq2_telemetry_parser::{
@@ -45,7 +47,11 @@ async fn send_response<'a>(uart: &mut UartTx<'static, UART0, Async>, response: C
     debug!("send_response::end");
 }
 
-pub async fn uart_task(uart: Uart<'static, UART0, Async>) {
+pub async fn uart_task(
+    uart: Uart<'static, UART0, Async>,
+    mut lora2_sender: Sender<'static, NoopRawMutex, Command, 4>,
+    lora2_receiver: Receiver<'static, NoopRawMutex, Command, 4>,
+) {
     let mut parser = SelfContainedFrameParser::new();
     let mut dispatcher = IncomingDataProcessor::new(&mut parser);
     let (mut outgoing, mut incoming) = uart.split();
@@ -56,30 +62,13 @@ pub async fn uart_task(uart: Uart<'static, UART0, Async>) {
             Ok(_) => {
                 debug!("{}", buffer[0]);
                 match dispatcher.feed(buffer[0]).await {
-                    Ok(Some(command)) => match command.payload {
-                        Payload::Data(items) => todo!(),
-                        Payload::Request {
-                            command_id,
-                            request,
-                        } => match request {
-                            Request::Ping => {
-                                info!("got ping, responding with pong");
-                                let response = Command {
-                                    destination: command.destination,
-                                    payload: Payload::Response {
-                                        command_id,
-                                        response: Response::Pong,
-                                    },
-                                };
-                                send_response(&mut outgoing, response).await;
-                            }
-                            Request::Status => todo!(),
-                            Request::Configure { .. } => todo!(),
-                        },
-                        Payload::Response {
-                            command_id,
-                            response,
-                        } => todo!(),
+                    Ok(Some(command)) => match command.destination {
+                        rq2_telemetry_parser::Module::Lora1 => todo!(),
+                        rq2_telemetry_parser::Module::Lora2 => {
+                            lora2_sender.send(command).await;
+                            let response = lora2_receiver.receive().await;
+                            send_response(&mut outgoing, response).await;
+                        }
                     },
                     Ok(None) => {}
                     Err(e) => error!("Got error: {:?}", defmt::Debug2Format(&e)),

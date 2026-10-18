@@ -138,7 +138,12 @@ async fn main(spawner: Spawner) {
             static_lora2_receive_channel.sender(),
         ))
         .expect("Can't spawn receiver task");
-    uart_task(uart).await;
+    uart_task(
+        uart,
+        static_lora2_send_channel.sender(),
+        static_lora2_receive_channel.receiver(),
+    )
+    .await;
     loop {
         Timer::after_millis(10).await;
     }
