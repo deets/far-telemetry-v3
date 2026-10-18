@@ -104,12 +104,19 @@ pub enum Request {
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
+pub enum ErrorCode {
+    CantSetConfiguration,
+}
+
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
 pub enum Response {
     Pong,
     /// A bunch of requests just need acknowledegment
     Ack,
     /// Report the current mode we are in
     Status(Mode),
+    /// Error
+    Error(ErrorCode),
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -123,6 +130,7 @@ pub enum Error<E> {
     UnexpectedResponse,
     DataProcessed,
     DataProcessingError(E),
+    DeviceError(ErrorCode),
 }
 
 impl<E> From<postcard::Error> for Error<E> {
@@ -301,6 +309,7 @@ impl<E> Expectation<E> {
             (ResponseKind::Status, Response::Status(_)) => true,
             (ResponseKind::Configure, Response::Ack) => true,
             (ResponseKind::Pong, Response::Pong) => true,
+            (_, Response::Error(code)) => return Err(Error::DeviceError(code)),
             _ => false,
         } {
             Ok(())
@@ -637,6 +646,38 @@ mod tests {
                 .process_response_or_timeout(Some(response))
                 .await,
             Ok(None),
+        );
+    }
+
+    #[tokio::test]
+    async fn command_processor_errors_are_lifted() {
+        let mut tdp = TestDataProcessor { data: std::vec![] };
+        let mut command_processor = CommandProcessor::new(&mut tdp);
+        let request = Request::Configure {
+            bandwidth: Bandwidth::_400KHz,
+            spreading_factor: SpreadingFactor::_12,
+            coding_rate: CodingRate::_4_8,
+            frequency: 2450,
+        };
+        assert!(command_processor
+            .create_and_expect_command(Module::Lora1, request)
+            .await
+            .is_ok());
+        let mut payload: heapless::Vec<u8, 128> = heapless::Vec::new();
+        payload.extend_from_slice(b"DIEZ WAS HERE").unwrap();
+
+        let response = Command {
+            destination: Module::Lora1,
+            payload: Payload::Response {
+                command_id: 1,
+                response: Response::Error(ErrorCode::CantSetConfiguration),
+            },
+        };
+        assert_eq!(
+            command_processor
+                .process_response_or_timeout(Some(response))
+                .await,
+            Err(Error::DeviceError(ErrorCode::CantSetConfiguration))
         );
     }
 }
