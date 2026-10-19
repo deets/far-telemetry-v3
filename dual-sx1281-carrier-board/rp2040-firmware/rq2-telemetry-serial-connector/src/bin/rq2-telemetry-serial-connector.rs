@@ -44,10 +44,80 @@ struct Cli {
     command: Commands,
 }
 
+#[derive(ValueEnum, Clone, Copy, PartialEq, Debug)]
+enum SpreadingFactor {
+    _6,
+    _7,
+    _8,
+    _9,
+    _10,
+    _11,
+    _12,
+}
+
+impl From<SpreadingFactor> for rq2_telemetry_parser::SpreadingFactor {
+    fn from(value: SpreadingFactor) -> Self {
+        match value {
+            SpreadingFactor::_6 => rq2_telemetry_parser::SpreadingFactor::_6,
+            SpreadingFactor::_7 => rq2_telemetry_parser::SpreadingFactor::_7,
+            SpreadingFactor::_8 => rq2_telemetry_parser::SpreadingFactor::_8,
+            SpreadingFactor::_9 => rq2_telemetry_parser::SpreadingFactor::_9,
+            SpreadingFactor::_10 => rq2_telemetry_parser::SpreadingFactor::_10,
+            SpreadingFactor::_11 => rq2_telemetry_parser::SpreadingFactor::_11,
+            SpreadingFactor::_12 => rq2_telemetry_parser::SpreadingFactor::_12,
+        }
+    }
+}
+
+#[derive(ValueEnum, Clone, Copy, PartialEq, Debug)]
+enum Bandwidth {
+    _200KHz,
+    _400KHz,
+    _800KHz,
+    _1600KHz,
+}
+
+impl From<Bandwidth> for rq2_telemetry_parser::Bandwidth {
+    fn from(value: Bandwidth) -> Self {
+        match value {
+            Bandwidth::_200KHz => rq2_telemetry_parser::Bandwidth::_200KHz,
+            Bandwidth::_400KHz => rq2_telemetry_parser::Bandwidth::_400KHz,
+            Bandwidth::_800KHz => rq2_telemetry_parser::Bandwidth::_800KHz,
+            Bandwidth::_1600KHz => rq2_telemetry_parser::Bandwidth::_1600KHz,
+        }
+    }
+}
+
+#[derive(ValueEnum, Clone, Copy, PartialEq, Debug)]
+enum CodingRate {
+    _4_5,
+    _4_6,
+    _4_7,
+    _4_8,
+}
+
+impl From<CodingRate> for rq2_telemetry_parser::CodingRate {
+    fn from(value: CodingRate) -> Self {
+        match value {
+            CodingRate::_4_5 => rq2_telemetry_parser::CodingRate::_4_5,
+            CodingRate::_4_6 => rq2_telemetry_parser::CodingRate::_4_6,
+            CodingRate::_4_7 => rq2_telemetry_parser::CodingRate::_4_7,
+            CodingRate::_4_8 => rq2_telemetry_parser::CodingRate::_4_8,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
     Ping,
     StartSending,
+    Configure {
+        spreading_factor: SpreadingFactor,
+        bandwidth: Bandwidth,
+        coding_rate: CodingRate,
+        output_power: i32,
+        frequency: usize,
+    },
 }
 
 fn default_port() -> eyre::Result<String> {
@@ -157,10 +227,27 @@ async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
             match args.command {
                 Commands::Ping => Request::Ping,
                 Commands::StartSending => Request::Send,
+                Commands::Configure {
+                    spreading_factor,
+                    bandwidth,
+                    coding_rate,
+                    output_power,
+                    frequency,
+                } => {
+                    debug!("Frequency set: {}", frequency);
+                    Request::Configure {
+                        bandwidth: bandwidth.into(),
+                        spreading_factor: spreading_factor.into(),
+                        coding_rate: coding_rate.into(),
+                        output_power,
+                        frequency,
+                    }
+                }
             },
         )
         .await
         .map_err(|_| eyre::eyre!("Can't process request!"))?;
+    debug!("command: {:#?}", command);
     send_command(&mut port, command).await?;
     receive_command(&mut port, &mut incoming_processor, &mut command_processor).await
 }

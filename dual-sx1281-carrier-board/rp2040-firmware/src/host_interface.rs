@@ -1,4 +1,4 @@
-use defmt::{debug, error, info};
+use defmt::{debug, error};
 use embassy_rp::{
     peripherals::UART0,
     uart::{Async, Uart, UartTx},
@@ -8,16 +8,9 @@ use embassy_sync::channel::{Receiver, Sender};
 use heapless::Vec;
 use postcard::to_vec;
 use rq2_telemetry_parser::{
-    encode_frame, seven_bit_encode, Command, FeedIncomingData, FrameError, FrameProcessor,
-    FrameResult, IncomingDataProcessor, Payload, Request, Response, SelfContainedFrameParser,
+    encode_frame, seven_bit_encode, Command, FeedIncomingData, FrameError, FrameResult,
+    IncomingDataProcessor, Payload, Request, Response, SelfContainedFrameParser,
 };
-
-#[derive(Debug, Copy, Clone, PartialEq)]
-enum TestResponseProcessorError {
-    NothingWorks,
-}
-
-struct TestResponseProcessor {}
 
 async fn process_incoming(result: Result<FrameResult<'_>, FrameError>) {
     match result {
@@ -49,9 +42,9 @@ async fn send_response<'a>(uart: &mut UartTx<'static, UART0, Async>, response: C
 
 pub async fn uart_task(
     uart: Uart<'static, UART0, Async>,
-    mut lora1_sender: Sender<'static, NoopRawMutex, Command, 4>,
+    lora1_sender: Sender<'static, NoopRawMutex, Command, 4>,
     lora1_receiver: Receiver<'static, NoopRawMutex, Command, 4>,
-    mut lora2_sender: Sender<'static, NoopRawMutex, Command, 4>,
+    lora2_sender: Sender<'static, NoopRawMutex, Command, 4>,
     lora2_receiver: Receiver<'static, NoopRawMutex, Command, 4>,
 ) {
     let mut parser = SelfContainedFrameParser::new();
@@ -66,6 +59,7 @@ pub async fn uart_task(
                 match dispatcher.feed(buffer[0]).await {
                     Ok(Some(command)) => match command.destination {
                         rq2_telemetry_parser::Module::Lora1 => {
+                            debug!("sending command: {:#?}", defmt::Debug2Format(&command));
                             lora1_sender.send(command).await;
                             let response = lora1_receiver.receive().await;
                             send_response(&mut outgoing, response).await;

@@ -100,6 +100,7 @@ pub enum Request {
         /// Given in Megahertz
         /// TODO: there should be a data type for this
         frequency: usize,
+        output_power: i32,
     },
     /// Start sending, from this moment on we are pushing out
     /// frames coming over UART.
@@ -495,6 +496,7 @@ mod tests {
                     spreading_factor: SpreadingFactor::_12,
                     coding_rate: CodingRate::_4_8,
                     frequency: 2450,
+                    output_power: 10,
                 },
             },
         };
@@ -564,6 +566,7 @@ mod tests {
             spreading_factor: SpreadingFactor::_12,
             coding_rate: CodingRate::_4_8,
             frequency: 2450,
+            output_power: 10,
         };
         assert_eq!(
             command_processor
@@ -601,6 +604,7 @@ mod tests {
             spreading_factor: SpreadingFactor::_12,
             coding_rate: CodingRate::_4_8,
             frequency: 2450,
+            output_power: 10,
         };
         assert!(command_processor
             .create_and_expect_command(Module::Lora1, request)
@@ -636,6 +640,7 @@ mod tests {
             spreading_factor: SpreadingFactor::_12,
             coding_rate: CodingRate::_4_8,
             frequency: 2450,
+            output_power: 10,
         };
         assert!(command_processor
             .create_and_expect_command(Module::Lora1, request)
@@ -665,6 +670,7 @@ mod tests {
             spreading_factor: SpreadingFactor::_12,
             coding_rate: CodingRate::_4_8,
             frequency: 2450,
+            output_power: 10,
         };
         assert!(command_processor
             .create_and_expect_command(Module::Lora1, request)

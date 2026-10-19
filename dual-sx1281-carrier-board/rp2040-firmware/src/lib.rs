@@ -1,5 +1,5 @@
 #![no_std]
-use defmt::debug;
+use defmt::{debug, error};
 use embassy_rp::gpio::{Input, Output};
 use embassy_rp::peripherals::{SPI0, SPI1};
 use embassy_rp::spi::{Async, Spi};
@@ -8,30 +8,33 @@ use embassy_sync::channel::{Receiver, Sender};
 use embassy_time::Delay;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use lora_phy::iv::GenericSx128xInterfaceVariant;
-use lora_phy::mod_params::*;
+use lora_phy::mod_params::RadioError;
+use lora_phy::mod_params::{SpreadingFactor, *};
 use lora_phy::mod_traits::RadioKind;
 use lora_phy::sx128x::{Sx1281, Sx128x};
 use lora_phy::DelayNs;
 use lora_phy::LoRa;
 use rq2_telemetry_parser::{
-    Bandwidth, CodingRate, Command, ErrorCode, Mode, Module, Request, Response, SpreadingFactor,
+    Bandwidth as Rq2Bandwidth, CodingRate as Rq2CodingRate, Command, ErrorCode, Mode, Module,
+    Request, Response, SpreadingFactor as Rq2SpreadingFactor,
 };
 use {defmt_rtt as _, panic_probe as _};
 
 pub mod host_interface;
 
-const LORA_FREQUENCY_IN_HZ: u32 = 2_450_000_000; // warning: set this appropriately for the region
-
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 enum Error {
     ConfigurationError,
+    RadioError(RadioError),
 }
 
+#[derive(Debug)]
 struct LoRaConfiguration {
     bandwidth: Bandwidth,
     spreading_factor: SpreadingFactor,
     coding_rate: CodingRate,
     frequency: usize,
+    output_power: i32,
 }
 
 impl TryFrom<Request> for LoRaConfiguration {
@@ -44,12 +47,17 @@ impl TryFrom<Request> for LoRaConfiguration {
                 spreading_factor,
                 coding_rate,
                 frequency,
-            } => Ok(Self {
-                bandwidth,
-                spreading_factor,
-                coding_rate,
-                frequency,
-            }),
+                output_power,
+            } => {
+                error!("incoming frequency:{}", frequency);
+                Ok(Self {
+                    bandwidth: bw_convert(bandwidth),
+                    spreading_factor: sf_convert(spreading_factor),
+                    coding_rate: cr_convert(coding_rate),
+                    frequency: frequency * 1000_0000,
+                    output_power,
+                })
+            }
             _ => Err(Error::ConfigurationError),
         }
     }
@@ -73,6 +81,9 @@ where
     lora: LoRa<RK, DLY>,
     configuration: LoRaConfiguration,
     destination: Module,
+    modulation_params: ModulationParams,
+    tx_packet_params: PacketParams,
+    output_power: i32,
 }
 
 enum CommandResult<RK, DLY>
@@ -84,6 +95,43 @@ where
     Sending(LoraSendingManager<RK, DLY>),
 }
 
+impl From<RadioError> for Error {
+    fn from(value: RadioError) -> Self {
+        Self::RadioError(value)
+    }
+}
+
+struct DebugModulationParams<'a> {
+    modulation_params: &'a ModulationParams,
+}
+
+impl<'a> core::fmt::Debug for DebugModulationParams<'a> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("DebugModulationParams")
+            .field("spreading_factor", &self.modulation_params.spreading_factor)
+            .field("bandwidth", &self.modulation_params.bandwidth)
+            .field("coding_rate", &self.modulation_params.coding_rate)
+            .field("frequency_in_hz", &self.modulation_params.frequency_in_hz)
+            .finish()
+    }
+}
+
+struct DebugPacketParams<'a> {
+    packet_params: &'a PacketParams,
+}
+
+impl<'a> core::fmt::Debug for DebugPacketParams<'a> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("DebugPacketParams")
+            .field("preamble_length", &self.packet_params.preamble_length)
+            .field("implicit_header", &self.packet_params.implicit_header)
+            .field("payload_length", &self.packet_params.payload_length)
+            .field("crc_on", &self.packet_params.crc_on)
+            .field("iq_inverted", &self.packet_params.iq_inverted)
+            .finish()
+    }
+}
+
 impl<RK, DLY> LoraSendingManager<RK, DLY>
 where
     RK: RadioKind,
@@ -91,6 +139,27 @@ where
 {
     async fn send(mut self) -> Result<LoraConfigurationManager<RK, DLY>, Error> {
         debug!("Sending one message");
+        let buffer = b"DIEZ WAS HERE";
+        debug!(
+            "sending one packet: {:#?}, {:#?} {}",
+            defmt::Debug2Format(&DebugModulationParams {
+                modulation_params: &self.modulation_params
+            }),
+            defmt::Debug2Format(&DebugPacketParams {
+                packet_params: &self.tx_packet_params
+            }),
+            defmt::Debug2Format(&self.output_power)
+        );
+        self.lora
+            .prepare_for_tx(
+                &self.modulation_params,
+                &mut self.tx_packet_params,
+                self.output_power,
+                buffer,
+            )
+            .await?;
+        self.lora.tx().await?;
+
         Ok(LoraConfigurationManager {
             lora: self.lora,
             configuration: Some(self.configuration),
@@ -98,28 +167,19 @@ where
         })
     }
 }
+
 impl<RK, DLY> LoraConfigurationManager<RK, DLY>
 where
     RK: RadioKind,
     DLY: DelayNs,
 {
-    // fn create_modulation_params(
-    //     &mut self,
-    //     spreading_factor: SpreadingFactor,
-    //     bandwidth: Bandwidth,
-    //     coding_rate: CodingRate,
-    //     frequency_in_hz: u32,
-    // ) -> Result<ModulationParams, RadioError> {
-    //     self.lora.create_modulation_params(
-    //         spreading_factor,
-    //         bandwidth,
-    //         coding_rate,
-    //         frequency_in_hz,
-    //     )
-    // }
-
     fn set_configuration(&mut self, request: Request) -> Result<(), Error> {
-        self.configuration = Some(request.try_into()?);
+        let configuration = request.try_into()?;
+        error!(
+            "incoming configuration: {:#?}",
+            defmt::Debug2Format(&request)
+        );
+        self.configuration = Some(configuration);
         Ok(())
     }
 
@@ -128,11 +188,34 @@ where
         sender: &mut Sender<'static, NoopRawMutex, Command, 4>,
         command_id: u8,
     ) -> Result<CommandResult<RK, DLY>, Error> {
-        if let Some(configuration) = self.configuration {
+        if let Some(
+            configuration @ LoRaConfiguration {
+                bandwidth,
+                spreading_factor,
+                coding_rate,
+                frequency,
+                output_power,
+            },
+        ) = self.configuration
+        {
+            let modulation_params = self.lora.create_modulation_params(
+                spreading_factor,
+                bandwidth,
+                coding_rate,
+                frequency as u32,
+            )?;
+            let tx_packet_params =
+                self.lora
+                    .create_tx_packet_params(4, false, true, true, &modulation_params)?;
+
+            send_response(sender, self.destination, command_id, Response::Ack).await?;
             Ok(CommandResult::Sending(LoraSendingManager {
                 configuration,
                 lora: self.lora,
                 destination: self.destination,
+                modulation_params,
+                tx_packet_params,
+                output_power,
             }))
         } else {
             let response = Response::Error(ErrorCode::NoConfiguration);
@@ -243,19 +326,28 @@ pub async fn lora1_task(
         Delay,
     >,
     receiver: Receiver<'static, NoopRawMutex, Command, 4>,
-    mut sender: Sender<'static, NoopRawMutex, Command, 4>,
+    sender: Sender<'static, NoopRawMutex, Command, 4>,
 ) {
     let manager = LoraConfigurationManager {
         lora: lora1,
         configuration: None,
         destination: Module::Lora1,
     };
-    lora_work(manager, receiver, sender).await;
+
+    match lora_work(manager, receiver, sender).await {
+        Ok(_) => {}
+        Err(e) => {
+            error!(
+                "error working with module, halting: {:#?}",
+                defmt::Debug2Format(&e)
+            );
+        }
+    }
 }
 
 #[embassy_executor::task]
 pub async fn lora2_task(
-    mut lora2: LoRa<
+    lora2: LoRa<
         Sx128x<
             ExclusiveDevice<Spi<'static, SPI1, Async>, Output<'static>, Delay>,
             GenericSx128xInterfaceVariant<Output<'static>, Input<'static>>,
@@ -264,14 +356,22 @@ pub async fn lora2_task(
         Delay,
     >,
     receiver: Receiver<'static, NoopRawMutex, Command, 4>,
-    mut sender: Sender<'static, NoopRawMutex, Command, 4>,
+    sender: Sender<'static, NoopRawMutex, Command, 4>,
 ) {
     let manager = LoraConfigurationManager {
         lora: lora2,
         configuration: None,
         destination: Module::Lora2,
     };
-    lora_work(manager, receiver, sender).await;
+    match lora_work(manager, receiver, sender).await {
+        Ok(_) => {}
+        Err(e) => {
+            error!(
+                "error working with module, halting: {:#?}",
+                defmt::Debug2Format(&e)
+            );
+        }
+    }
 }
 
 // let mdltn_params = {
@@ -321,3 +421,32 @@ pub async fn lora2_task(
 //     }
 // }
 //}
+
+fn sf_convert(spreading_factor: Rq2SpreadingFactor) -> SpreadingFactor {
+    match spreading_factor {
+        Rq2SpreadingFactor::_6 => SpreadingFactor::_6,
+        Rq2SpreadingFactor::_7 => SpreadingFactor::_7,
+        Rq2SpreadingFactor::_8 => SpreadingFactor::_8,
+        Rq2SpreadingFactor::_9 => SpreadingFactor::_9,
+        Rq2SpreadingFactor::_10 => SpreadingFactor::_10,
+        Rq2SpreadingFactor::_11 => SpreadingFactor::_11,
+        Rq2SpreadingFactor::_12 => SpreadingFactor::_12,
+    }
+}
+fn bw_convert(bandwidth: Rq2Bandwidth) -> Bandwidth {
+    match bandwidth {
+        Rq2Bandwidth::_200KHz => Bandwidth::_200KHz,
+        Rq2Bandwidth::_400KHz => Bandwidth::_400KHz,
+        Rq2Bandwidth::_800KHz => Bandwidth::_800KHz,
+        Rq2Bandwidth::_1600KHz => Bandwidth::_1600KHz,
+    }
+}
+
+fn cr_convert(coding_rate: Rq2CodingRate) -> CodingRate {
+    match coding_rate {
+        Rq2CodingRate::_4_5 => CodingRate::_4_5,
+        Rq2CodingRate::_4_6 => CodingRate::_4_6,
+        Rq2CodingRate::_4_7 => CodingRate::_4_7,
+        Rq2CodingRate::_4_8 => CodingRate::_4_8,
+    }
+}
