@@ -47,6 +47,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     Ping,
+    StartSending,
 }
 
 fn default_port() -> eyre::Result<String> {
@@ -150,10 +151,14 @@ async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
     let mut tdp = TestDataProcessor::default();
     let mut command_processor = CommandProcessor::new(&mut tdp);
     let mut incoming_processor = IncomingDataProcessor::new(&mut parser);
-    let request = Request::Ping;
-
     let command = command_processor
-        .create_and_expect_command(args.destination.into(), request)
+        .create_and_expect_command(
+            args.destination.into(),
+            match args.command {
+                Commands::Ping => Request::Ping,
+                Commands::StartSending => Request::Send,
+            },
+        )
         .await
         .map_err(|_| eyre::eyre!("Can't process request!"))?;
     send_command(&mut port, command).await?;

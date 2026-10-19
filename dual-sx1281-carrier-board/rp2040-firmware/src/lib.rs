@@ -55,7 +55,7 @@ impl TryFrom<Request> for LoRaConfiguration {
     }
 }
 
-struct LoraManager<RK, DLY>
+struct LoraConfigurationManager<RK, DLY>
 where
     RK: RadioKind,
     DLY: DelayNs,
@@ -65,7 +65,40 @@ where
     destination: Module,
 }
 
-impl<RK, DLY> LoraManager<RK, DLY>
+struct LoraSendingManager<RK, DLY>
+where
+    RK: RadioKind,
+    DLY: DelayNs,
+{
+    lora: LoRa<RK, DLY>,
+    configuration: LoRaConfiguration,
+    destination: Module,
+}
+
+enum CommandResult<RK, DLY>
+where
+    RK: RadioKind,
+    DLY: DelayNs,
+{
+    Configuration(LoraConfigurationManager<RK, DLY>),
+    Sending(LoraSendingManager<RK, DLY>),
+}
+
+impl<RK, DLY> LoraSendingManager<RK, DLY>
+where
+    RK: RadioKind,
+    DLY: DelayNs,
+{
+    async fn send(mut self) -> Result<LoraConfigurationManager<RK, DLY>, Error> {
+        debug!("Sending one message");
+        Ok(LoraConfigurationManager {
+            lora: self.lora,
+            configuration: Some(self.configuration),
+            destination: self.destination,
+        })
+    }
+}
+impl<RK, DLY> LoraConfigurationManager<RK, DLY>
 where
     RK: RadioKind,
     DLY: DelayNs,
@@ -86,15 +119,33 @@ where
     // }
 
     fn set_configuration(&mut self, request: Request) -> Result<(), Error> {
-        //self.configuration = Some(request.into()?);
+        self.configuration = Some(request.try_into()?);
         Ok(())
     }
 
+    async fn start_sending(
+        mut self,
+        sender: &mut Sender<'static, NoopRawMutex, Command, 4>,
+        command_id: u8,
+    ) -> Result<CommandResult<RK, DLY>, Error> {
+        if let Some(configuration) = self.configuration {
+            Ok(CommandResult::Sending(LoraSendingManager {
+                configuration,
+                lora: self.lora,
+                destination: self.destination,
+            }))
+        } else {
+            let response = Response::Error(ErrorCode::NoConfiguration);
+            send_response(sender, self.destination, command_id, response).await?;
+            Ok(CommandResult::Configuration(self))
+        }
+    }
+
     async fn process_command(
-        &mut self,
+        mut self,
         sender: &mut Sender<'static, NoopRawMutex, Command, 4>,
         command: Command,
-    ) -> Result<(), Error> {
+    ) -> Result<CommandResult<RK, DLY>, Error> {
         match command.payload {
             rq2_telemetry_parser::Payload::Request {
                 command_id,
@@ -102,7 +153,8 @@ where
             } => match request {
                 Request::Ping => {
                     debug!("ping for {:#?}", defmt::Debug2Format(&self.destination));
-                    send_response(sender, self.destination, command_id, Response::Pong).await
+                    send_response(sender, self.destination, command_id, Response::Pong).await?;
+                    Ok(CommandResult::Configuration(self))
                 }
                 Request::Status => {
                     send_response(
@@ -111,7 +163,8 @@ where
                         command_id,
                         Response::Status(self.status()),
                     )
-                    .await
+                    .await?;
+                    Ok(CommandResult::Configuration(self))
                 }
                 Request::Configure { .. } => {
                     send_response(
@@ -123,8 +176,10 @@ where
                             Err(_) => Response::Error(ErrorCode::CantSetConfiguration),
                         },
                     )
-                    .await
+                    .await?;
+                    Ok(CommandResult::Configuration(self))
                 }
+                Request::Send => self.start_sending(sender, command_id).await,
             },
             rq2_telemetry_parser::Payload::Data(..) => todo!(),
             rq2_telemetry_parser::Payload::Response { .. } => todo!(),
@@ -136,7 +191,7 @@ trait HasStatus {
     fn status(&self) -> Mode;
 }
 
-impl<RK, DLY> HasStatus for LoraManager<RK, DLY>
+impl<RK, DLY> HasStatus for LoraConfigurationManager<RK, DLY>
 where
     RK: RadioKind,
     DLY: DelayNs,
@@ -164,13 +219,16 @@ async fn send_response(
 }
 
 async fn lora_work<RK: RadioKind, DLY: DelayNs>(
-    mut manager: LoraManager<RK, DLY>,
+    mut manager: LoraConfigurationManager<RK, DLY>,
     receiver: Receiver<'static, NoopRawMutex, Command, 4>,
     mut sender: Sender<'static, NoopRawMutex, Command, 4>,
-) {
+) -> Result<(), Error> {
     loop {
         let command = receiver.receive().await;
-        let response = manager.process_command(&mut sender, command).await;
+        manager = match manager.process_command(&mut sender, command).await? {
+            CommandResult::Configuration(lora_configuration_manager) => lora_configuration_manager,
+            CommandResult::Sending(lora_sending_manager) => lora_sending_manager.send().await?,
+        };
     }
 }
 
@@ -187,7 +245,7 @@ pub async fn lora1_task(
     receiver: Receiver<'static, NoopRawMutex, Command, 4>,
     mut sender: Sender<'static, NoopRawMutex, Command, 4>,
 ) {
-    let manager = LoraManager {
+    let manager = LoraConfigurationManager {
         lora: lora1,
         configuration: None,
         destination: Module::Lora1,
@@ -208,7 +266,7 @@ pub async fn lora2_task(
     receiver: Receiver<'static, NoopRawMutex, Command, 4>,
     mut sender: Sender<'static, NoopRawMutex, Command, 4>,
 ) {
-    let manager = LoraManager {
+    let manager = LoraConfigurationManager {
         lora: lora2,
         configuration: None,
         destination: Module::Lora2,

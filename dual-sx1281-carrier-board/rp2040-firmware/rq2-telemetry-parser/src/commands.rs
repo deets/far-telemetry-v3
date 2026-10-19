@@ -101,11 +101,15 @@ pub enum Request {
         /// TODO: there should be a data type for this
         frequency: usize,
     },
+    /// Start sending, from this moment on we are pushing out
+    /// frames coming over UART.
+    Send,
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
 pub enum ErrorCode {
     CantSetConfiguration,
+    NoConfiguration,
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
@@ -169,6 +173,7 @@ enum ResponseKind {
     Status,
     Configure,
     Pong,
+    Send,
 }
 
 impl From<Request> for ResponseKind {
@@ -177,6 +182,7 @@ impl From<Request> for ResponseKind {
             Request::Status => ResponseKind::Status,
             Request::Configure { .. } => ResponseKind::Configure,
             Request::Ping => ResponseKind::Pong,
+            Request::Send => ResponseKind::Send,
         }
     }
 }
@@ -309,6 +315,7 @@ impl<E> Expectation<E> {
             (ResponseKind::Status, Response::Status(_)) => true,
             (ResponseKind::Configure, Response::Ack) => true,
             (ResponseKind::Pong, Response::Pong) => true,
+            (ResponseKind::Send, Response::Ack) => true,
             (_, Response::Error(code)) => return Err(Error::DeviceError(code)),
             _ => false,
         } {
