@@ -1,4 +1,5 @@
 #![no_std]
+use defmt::debug;
 use embassy_rp::gpio::{Input, Output};
 use embassy_rp::peripherals::{SPI0, SPI1};
 use embassy_rp::spi::{Async, Spi};
@@ -61,6 +62,7 @@ where
 {
     lora: LoRa<RK, DLY>,
     configuration: Option<LoRaConfiguration>,
+    destination: Module,
 }
 
 impl<RK, DLY> LoraManager<RK, DLY>
@@ -87,6 +89,47 @@ where
         //self.configuration = Some(request.into()?);
         Ok(())
     }
+
+    async fn process_command(
+        &mut self,
+        sender: &mut Sender<'static, NoopRawMutex, Command, 4>,
+        command: Command,
+    ) -> Result<(), Error> {
+        match command.payload {
+            rq2_telemetry_parser::Payload::Request {
+                command_id,
+                request,
+            } => match request {
+                Request::Ping => {
+                    debug!("ping for {:#?}", defmt::Debug2Format(&self.destination));
+                    send_response(sender, self.destination, command_id, Response::Pong).await
+                }
+                Request::Status => {
+                    send_response(
+                        sender,
+                        self.destination,
+                        command_id,
+                        Response::Status(self.status()),
+                    )
+                    .await
+                }
+                Request::Configure { .. } => {
+                    send_response(
+                        sender,
+                        self.destination,
+                        command_id,
+                        match self.set_configuration(request) {
+                            Ok(_) => Response::Ack,
+                            Err(_) => Response::Error(ErrorCode::CantSetConfiguration),
+                        },
+                    )
+                    .await
+                }
+            },
+            rq2_telemetry_parser::Payload::Data(..) => todo!(),
+            rq2_telemetry_parser::Payload::Response { .. } => todo!(),
+        }
+    }
 }
 
 trait HasStatus {
@@ -108,7 +151,7 @@ async fn send_response(
     destination: rq2_telemetry_parser::Module,
     command_id: u8,
     response: Response,
-) {
+) -> Result<(), Error> {
     let response = Command {
         destination,
         payload: rq2_telemetry_parser::Payload::Response {
@@ -117,52 +160,17 @@ async fn send_response(
         },
     };
     sender.send(response).await;
+    Ok(())
 }
 
 async fn lora_work<RK: RadioKind, DLY: DelayNs>(
     mut manager: LoraManager<RK, DLY>,
-    destination: Module,
     receiver: Receiver<'static, NoopRawMutex, Command, 4>,
     mut sender: Sender<'static, NoopRawMutex, Command, 4>,
 ) {
     loop {
         let command = receiver.receive().await;
-        match command.payload {
-            rq2_telemetry_parser::Payload::Data(items) => todo!(),
-            rq2_telemetry_parser::Payload::Request {
-                command_id,
-                request,
-            } => match request {
-                Request::Ping => {
-                    send_response(&mut sender, destination, command_id, Response::Pong).await;
-                }
-                Request::Status => {
-                    send_response(
-                        &mut sender,
-                        Module::Lora2,
-                        command_id,
-                        Response::Status(manager.status()),
-                    )
-                    .await;
-                }
-                Request::Configure { .. } => {
-                    send_response(
-                        &mut sender,
-                        Module::Lora2,
-                        command_id,
-                        match manager.set_configuration(request) {
-                            Ok(_) => Response::Ack,
-                            Err(_) => Response::Error(ErrorCode::CantSetConfiguration),
-                        },
-                    )
-                    .await;
-                }
-            },
-            rq2_telemetry_parser::Payload::Response {
-                command_id,
-                response,
-            } => todo!(),
-        }
+        let response = manager.process_command(&mut sender, command).await;
     }
 }
 
@@ -182,8 +190,9 @@ pub async fn lora1_task(
     let manager = LoraManager {
         lora: lora1,
         configuration: None,
+        destination: Module::Lora1,
     };
-    lora_work(manager, Module::Lora1, receiver, sender).await;
+    lora_work(manager, receiver, sender).await;
 }
 
 #[embassy_executor::task]
@@ -202,8 +211,9 @@ pub async fn lora2_task(
     let manager = LoraManager {
         lora: lora2,
         configuration: None,
+        destination: Module::Lora2,
     };
-    lora_work(manager, Module::Lora2, receiver, sender).await;
+    lora_work(manager, receiver, sender).await;
 }
 
 // let mdltn_params = {
