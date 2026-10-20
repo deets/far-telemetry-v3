@@ -5,6 +5,7 @@ edition = "2021"
 
 [features]
 use_std_time = []
+defmt = ["dep:defmt"]
 
 [dependencies]
 base64-ng = { version = "2.0.4", default-features = false }
@@ -14,6 +15,7 @@ postcard.workspace = true
 serde.workspace = true
 num-integer.workspace = true
 embassy-time.workspace = true
+defmt = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.53.2", features = ["time", "macros", "rt"] }

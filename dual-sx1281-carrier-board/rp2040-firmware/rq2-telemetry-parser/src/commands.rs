@@ -1,3 +1,6 @@
+#[cfg(feature = "defmt")]
+use defmt::error;
+
 use crate::encode_frame;
 use crate::seven_bit_decode;
 use crate::seven_bit_encode;
@@ -363,6 +366,8 @@ where
     async fn process_frame(&mut self, frame: &[u8]) -> Result<Option<Command>, DispatcherError> {
         let decoded = seven_bit_decode(&mut self.working, frame)
             .map_err(DispatcherError::SevenBitEncodingError)?;
+        #[cfg(feature = "defmt")]
+        error!("process_frame::decoded: {:?}", decoded);
         Ok(Some(
             from_bytes(decoded).map_err(DispatcherError::PostcardError)?,
         ))
@@ -378,8 +383,11 @@ where
         let mut frame_copy = [0; 128];
         match frame_result {
             Ok(FrameResult::Frame(frame)) => {
-                frame_copy[0..frame.len()].copy_from_slice(frame);
-                self.process_frame(&frame_copy).await
+                let l = frame.len();
+                frame_copy[0..l].copy_from_slice(frame);
+                #[cfg(feature = "defmt")]
+                error!("feed::frame_copy: {:?}", frame_copy[0..l]);
+                self.process_frame(&frame_copy[0..l]).await
             }
             Ok(Nothing) => Ok(None),
             Err(frame_error) => return Err(DispatcherError::FrameError(frame_error)),
@@ -423,6 +431,7 @@ where
         let mut buffer = [0; 128];
         let encoded_frame = encode_frame(&mut buffer, seven_bit_data)
             .map_err(EncodedFrameWriterError::FrameError)?;
+        //std::println!("encoded bytes: {:#?}", encoded_frame);
         self.writer
             .write(encoded_frame)
             .await
@@ -693,4 +702,36 @@ mod tests {
             Err(Error::DeviceError(ErrorCode::CantSetConfiguration))
         );
     }
+
+    // #[test]
+    // fn test_configuration_command_deserialization() {
+    //     let expected = Command {
+    //         destination: Module::Lora1,
+    //         payload: Payload::Request {
+    //             command_id: 1,
+
+    //             request: Request::Configure {
+    //                 bandwidth: Bandwidth::_200KHz,
+    //                 spreading_factor: SpreadingFactor::_12,
+    //                 coding_rate: CodingRate::_4_8,
+    //                 frequency: 2450,
+    //                 output_power: 10,
+    //             },
+    //         },
+    //     };
+    //     // These are the bytes from the serialized rq2-serial command
+    //     let sent_bytes = [0, 1, 1, 2, 0, 6, 3, 146, 19, 20];
+    //     let command: Command = from_bytes(&sent_bytes).unwrap();
+    //     assert_eq!(expected, command);
+    //     // These are the bytes from the 7-bit and frame encoded rq2-serial command
+    //     let serial_bytes = [140, 0, 0, 32, 16, 16, 0, 12, 1, 73, 4, 98, 64];
+    //     let mut frame_parser = SelfContainedFrameParser::new();
+    //     for b in serial_bytes {
+    //         if let Ok(FrameResult::Frame(frame)) = frame_parser.feed(b) {
+    //             let mut working = [0; 128];
+    //             let decoded = seven_bit_decode(&mut working, frame);
+    //             std::println!("decoded: {:#?}", decoded);
+    //         }
+    //     }
+    // }
 }

@@ -112,13 +112,15 @@ pub fn encode_frame<'a>(buffer: &'a mut [u8], input: &[u8]) -> Result<&'a [u8], 
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SevenBitTranscoderError {
+    /// Not enough space to store data into
     BufferOverflow,
+    /// Not enough space to fetch data from
+    BufferUnderflow,
 }
 
 /// Our framing forbids the MSB to be set.  To accomodate this, I'm
 /// encoding bytes as 7-bit values that are shifted to create full 8
-/// bit bytes. This struct helps accomplishing this from both sides.
-
+/// bit bytes.
 /// Encode a buffer of 8 bit bytes into a buffer that
 /// guarantees the MSB is always 0, and the bits are
 /// send as a otherwise consecutive stream.
@@ -148,7 +150,8 @@ pub fn seven_bit_encode<'a>(
         // );
         // We are fully within one bytes
         let value = if byte_index_start == byte_index_end {
-            (incoming[byte_index_start] >> 1) & 0x7F
+            // depending on offset, consider upper/lower 7 bits.
+            (incoming[byte_index_start] >> (byte_index_start % 2)) & 0x7F
         } else {
             let shift = i % 8;
             // #[cfg(test)]
@@ -172,27 +175,72 @@ pub fn seven_bit_decode<'a>(
     buffer: &'a mut [u8],
     incoming: &[u8],
 ) -> Result<&'a [u8], SevenBitTranscoderError> {
-    let count = incoming.len() * 7 / 8;
+    if buffer.is_empty() {
+        return Err(SevenBitTranscoderError::BufferUnderflow);
+    }
+    let byte_count = incoming.len() * 7 / 8;
     // A special case that could be considered verboten: encoding
     // one byte into a 7-bit-based buffer *always* needs two
     // bytes, as you don't know if the least significant bit is zero or not.
     // However when decoding you can imply that w/o a byte, it's a zero
-    if count < 1 {
+    if byte_count < 1 {
         buffer[0] = incoming[0] << 1;
         return Ok(&buffer[0..1]);
     }
-    for i in 0..count {
-        let upper = incoming[i];
-        let lower = incoming[i % 7 + 1];
-        let value = upper << (i % 7 + 1) | lower >> (6 - (i % 7));
-        buffer[i] = value;
+    // Ensure we have no polluted data
+    buffer.fill(0);
+    for i in 0..byte_count {
+        let bit_index_start = i * 8;
+        let bit_index_end = bit_index_start + 7;
+        let byte_index_start = bit_index_start / 7;
+        let byte_index_end = bit_index_end / 7;
+        let shift = (i + 1) % 7;
+        if shift == 0 {
+            buffer[i] = incoming[byte_index_start + 1] & 0x7f;
+        } else {
+            let rs = 7 - shift;
+            #[cfg(test)]
+            std::println!(
+            "{i} -> {bit_index_start}/{byte_index_start} - {bit_index_end}/{byte_index_end}, shift: {shift} "
+        );
+            buffer[i] |= incoming[byte_index_start] << shift;
+            buffer[i] |= incoming[byte_index_end] >> rs;
+        }
     }
-    Ok(&buffer[0..count])
+    Ok(&buffer[0..byte_count])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transcode_large_buffer() {
+        let mut encode_buffer = [0; 1024];
+        let mut decode_buffer = [0; 1024];
+        let mut data = [0; 14];
+        for (i, c) in data.iter_mut().enumerate() {
+            *c = i as u8;
+        }
+        let encoded = seven_bit_encode(&mut encode_buffer, &data).unwrap();
+        assert_eq!(
+            data.as_slice(),
+            seven_bit_decode(&mut decode_buffer, encoded).unwrap()
+        );
+    }
+
+    #[test]
+    fn transcode_test() {
+        let mut encode_buffer = [0; 1024];
+        let mut decode_buffer = [0; 1024];
+        let data = [0, 1, 1, 2, 0, 6, 3, 146, 19, 20];
+        let encoded = seven_bit_encode(&mut encode_buffer, &data).unwrap();
+        assert_eq!(&[0, 0, 32, 16, 16, 0, 12, 3, 73, 4, 98, 64], encoded);
+        assert_eq!(
+            data.as_slice(),
+            seven_bit_decode(&mut decode_buffer, encoded).unwrap()
+        );
+    }
 
     #[test]
     fn transcode_eight_bytes_from_seven_bit_transfer() {

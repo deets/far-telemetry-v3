@@ -164,12 +164,14 @@ impl Write for SerialPortWriteHelper<'_> {
     type Error = std::io::Error;
 
     async fn write(&mut self, buffer: &[u8]) -> Result<(), Self::Error> {
+        debug!("sent bytes over serial: {:#?}", &buffer);
         self.port.write_all(buffer).await
     }
 }
 
 async fn send_command(port: &mut SerialStream, command: Command) -> eyre::Result<()> {
     let output: heapless::Vec<u8, 256> = to_vec(&command)?;
+    debug!("sent bytes before transformation: {:#?}", &output);
     let mut write_helper = SerialPortWriteHelper { port };
     let mut encoded_writer = EncodedFrameWriter::new(&mut write_helper);
     encoded_writer

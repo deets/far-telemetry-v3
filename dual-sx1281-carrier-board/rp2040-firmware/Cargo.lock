@@ -2760,6 +2760,7 @@ name = "rq2-telemetry-parser"
 version = "0.1.0"
 dependencies = [
  "base64-ng",
+ "defmt 0.3.100",
  "embassy-futures",
  "embassy-time",
  "heapless 0.7.17",
