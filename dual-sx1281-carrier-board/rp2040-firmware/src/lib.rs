@@ -54,7 +54,7 @@ impl TryFrom<Request> for LoRaConfiguration {
                     bandwidth: bw_convert(bandwidth),
                     spreading_factor: sf_convert(spreading_factor),
                     coding_rate: cr_convert(coding_rate),
-                    frequency: frequency * 1000_0000,
+                    frequency: frequency * 1000_000,
                     output_power,
                 })
             }
