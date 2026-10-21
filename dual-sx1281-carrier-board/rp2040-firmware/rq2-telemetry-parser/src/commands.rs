@@ -34,6 +34,13 @@ use serde::{Deserialize, Serialize};
 use Error::SerializationError;
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
+pub enum ErrorCode {
+    CantSetConfiguration,
+    NoConfiguration,
+    InvalidCommand,
+}
+
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
 pub enum Mode {
     Idle,
     Tx,
@@ -108,13 +115,10 @@ pub enum Request {
     /// Start sending, from this moment on we are pushing out
     /// frames coming over UART.
     Send,
-}
-
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
-pub enum ErrorCode {
-    CantSetConfiguration,
-    NoConfiguration,
-    InvalidCommand,
+    /// Start receiving.
+    Receive,
+    /// Stop sending or receiving*
+    Stop,
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]
@@ -179,6 +183,8 @@ enum ResponseKind {
     Configure,
     Pong,
     Send,
+    Receive,
+    Stop,
 }
 
 impl From<Request> for ResponseKind {
@@ -188,6 +194,8 @@ impl From<Request> for ResponseKind {
             Request::Configure { .. } => ResponseKind::Configure,
             Request::Ping => ResponseKind::Pong,
             Request::Send => ResponseKind::Send,
+            Request::Receive => ResponseKind::Receive,
+            Request::Stop => ResponseKind::Stop,
         }
     }
 }
@@ -321,6 +329,8 @@ impl<E> Expectation<E> {
             (ResponseKind::Configure, Response::Ack) => true,
             (ResponseKind::Pong, Response::Pong) => true,
             (ResponseKind::Send, Response::Ack) => true,
+            (ResponseKind::Receive, Response::Ack) => true,
+            (ResponseKind::Stop, Response::Ack) => true,
             (_, Response::Error(code)) => return Err(Error::DeviceError(code)),
             _ => false,
         } {

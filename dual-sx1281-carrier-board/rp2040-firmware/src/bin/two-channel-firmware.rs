@@ -154,6 +154,7 @@ async fn main(spawner: Spawner) {
             static_lora1_send_channel.receiver(),
             static_lora1_receive_channel.sender(),
             static_payload_lora1_send_channel.receiver(),
+            static_payload_lora1_receive_channel.sender(),
         ))
         .expect("Can't spawn receiver task");
 
@@ -163,6 +164,7 @@ async fn main(spawner: Spawner) {
             static_lora2_send_channel.receiver(),
             static_lora2_receive_channel.sender(),
             static_payload_lora2_send_channel.receiver(),
+            static_payload_lora2_receive_channel.sender(),
         ))
         .expect("Can't spawn receiver task");
 

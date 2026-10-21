@@ -1,16 +1,15 @@
-use std::time::Duration;
-
 use clap::{Parser, Subcommand, ValueEnum};
+use eyre::bail;
 use postcard::to_vec;
 use rq2_telemetry_parser::{
     Command, CommandProcessor, DataProcessor, EncodedFrameWriter, FeedIncomingData,
-    IncomingDataProcessor, Request, ResponseProcessor, SelfContainedFrameParser, Write,
+    IncomingDataProcessor, Request, Response, ResponseProcessor, SelfContainedFrameParser, Write,
 };
+use std::time::Duration;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    time::timeout,
+    time::{sleep, timeout},
 };
-
 use tokio_serial::{available_ports, SerialPortBuilderExt, SerialPortType::UsbPort, SerialStream};
 use tracing::{debug, error};
 
@@ -121,6 +120,18 @@ enum Commands {
     Send {
         payload: String,
     },
+    Receive,
+    /// Setup both modules (ignoring destination)
+    /// to the same configuration, and put one
+    /// into Tx, the other into RxContinuous.
+    /// Then send out packets and receive them.
+    AirLoop {
+        spreading_factor: SpreadingFactor,
+        bandwidth: Bandwidth,
+        coding_rate: CodingRate,
+        output_power: i32,
+        frequency: usize,
+    },
 }
 
 fn default_port() -> eyre::Result<String> {
@@ -167,14 +178,12 @@ impl Write for SerialPortWriteHelper<'_> {
     type Error = std::io::Error;
 
     async fn write(&mut self, buffer: &[u8]) -> Result<(), Self::Error> {
-        debug!("sent bytes over serial: {:#?}", &buffer);
         self.port.write_all(buffer).await
     }
 }
 
 async fn send_command(port: &mut SerialStream, command: Command) -> eyre::Result<()> {
     let output: heapless::Vec<u8, 256> = to_vec(&command)?;
-    debug!("sent bytes before transformation: {:#?}", &output);
     let mut write_helper = SerialPortWriteHelper { port };
     let mut encoded_writer = EncodedFrameWriter::new(&mut write_helper);
     encoded_writer
@@ -187,7 +196,7 @@ async fn receive_command(
     port: &mut SerialStream,
     incoming_processor: &mut impl FeedIncomingData,
     command_processor: &mut impl ResponseProcessor<TestDataProcessorError>,
-) -> eyre::Result<()> {
+) -> eyre::Result<Response> {
     loop {
         let mut buffer = [0; 1];
         match timeout(Duration::from_millis(100), port.read(&mut buffer)).await {
@@ -198,12 +207,13 @@ async fn receive_command(
                     .map_err(|e| eyre::eyre!("dispatch error: {:#?}", e))?
                 {
                     Some(response) => {
-                        let response = command_processor
+                        if let Some(response) = command_processor
                             .process_response_or_timeout(Some(response))
                             .await
-                            .map_err(|e| eyre::eyre!("response processing error: {:#?}", e))?;
-                        println!("{:#?}", response);
-                        break;
+                            .map_err(|e| eyre::eyre!("response processing error: {:#?}", e))?
+                        {
+                            return Ok(response);
+                        }
                     }
                     None => {}
                 }
@@ -216,61 +226,160 @@ async fn receive_command(
             }
         }
     }
-    Ok(())
+}
+
+async fn transact(
+    port: &mut SerialStream,
+    destination: Module,
+    request: Request,
+) -> eyre::Result<Response> {
+    let mut parser = SelfContainedFrameParser::new();
+    let mut tdp = TestDataProcessor::default();
+    let mut command_processor = CommandProcessor::new(&mut tdp);
+    let mut incoming_processor = IncomingDataProcessor::new(&mut parser);
+    let command = command_processor
+        .create_and_expect_command(destination.into(), request)
+        .await
+        .map_err(|_| eyre::eyre!("Can't process request!"))?;
+    send_command(port, command).await?;
+    receive_command(port, &mut incoming_processor, &mut command_processor).await
+}
+
+async fn send_payload(
+    port: &mut SerialStream,
+    destination: Module,
+    payload: &[u8],
+) -> eyre::Result<()> {
+    let mut data: heapless::Vec<u8, 128> = heapless::Vec::new();
+    data.extend_from_slice(payload)
+        .expect("Buffer overflow in send_payload");
+    let command = Command {
+        destination: destination.into(),
+        payload: rq2_telemetry_parser::Payload::Data(data),
+    };
+    send_command(port, command).await
+}
+
+async fn receive_payload(port: &mut SerialStream) -> eyre::Result<()> {
+    let mut parser = SelfContainedFrameParser::new();
+    let mut incoming_processor = IncomingDataProcessor::new(&mut parser);
+    loop {
+        let mut buffer = [0; 1];
+        match timeout(Duration::from_secs(2), port.read(&mut buffer)).await {
+            Ok(_) => match incoming_processor.feed(buffer[0]).await {
+                Ok(Some(command)) => match command {
+                    Command {
+                        payload: rq2_telemetry_parser::Payload::Data(data),
+                        ..
+                    } => {
+                        println!(
+                            "received payload: {:?} from {:?}",
+                            &data, command.destination
+                        );
+                        return Ok(());
+                    }
+                    _ => {
+                        bail!("Received stray command: {:#?}", command);
+                    }
+                },
+                Ok(None) => {}
+                Err(_) => bail!("Error parsing incoming payload"),
+            },
+            Err(_) => bail!("Timeout waiting for incoming payload"),
+        }
+    }
+}
+
+async fn run_airloop(port: &mut SerialStream, airloop: Commands) -> eyre::Result<()> {
+    if let Commands::AirLoop {
+        spreading_factor,
+        bandwidth,
+        coding_rate,
+        output_power,
+        frequency,
+    } = airloop
+    {
+        // Just reset the modules, ignore error
+        let _ = transact(port, Module::Lora1, Request::Stop).await;
+        let _ = transact(port, Module::Lora2, Request::Stop).await;
+
+        let configuration_request = Request::Configure {
+            bandwidth: bandwidth.into(),
+            spreading_factor: spreading_factor.into(),
+            coding_rate: coding_rate.into(),
+            output_power,
+            frequency,
+        };
+        transact(port, Module::Lora1, configuration_request).await?;
+        transact(port, Module::Lora1, Request::Send).await?;
+        transact(port, Module::Lora2, configuration_request).await?;
+        transact(port, Module::Lora2, Request::Receive).await?;
+        loop {
+            send_payload(port, Module::Lora1, b"This is a test").await?;
+            receive_payload(port).await?;
+            sleep(Duration::from_secs(2)).await;
+        }
+    } else {
+        unreachable!();
+    }
 }
 
 async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
     debug!("serial_port: {serial_port}");
     let mut port = tokio_serial::new(serial_port, args.serial_speed).open_native_async()?;
     let mut parser = SelfContainedFrameParser::new();
-    if let Commands::Send { payload } = args.command {
-        let mut payload_vector: heapless::Vec<u8, 128> = heapless::Vec::new();
-        payload_vector
-            .extend_from_slice(&payload.into_bytes())
-            .map_err(|_| eyre::eyre!("Can't create payload"))?;
-        send_command(
-            &mut port,
-            Command {
-                destination: args.destination.into(),
-                payload: rq2_telemetry_parser::Payload::Data(payload_vector),
-            },
-        )
-        .await?;
-        Ok(())
-    } else {
-        let mut tdp = TestDataProcessor::default();
-        let mut command_processor = CommandProcessor::new(&mut tdp);
-        let mut incoming_processor = IncomingDataProcessor::new(&mut parser);
-        let command = command_processor
-            .create_and_expect_command(
-                args.destination.into(),
-                match args.command {
-                    Commands::Ping => Request::Ping,
-                    Commands::StartSending => Request::Send,
-                    Commands::Configure {
-                        spreading_factor,
-                        bandwidth,
-                        coding_rate,
-                        output_power,
-                        frequency,
-                    } => {
-                        debug!("Frequency set: {}", frequency);
-                        Request::Configure {
+    match args.command {
+        airloop @ Commands::AirLoop { .. } => run_airloop(&mut port, airloop).await,
+        Commands::Send { payload } => {
+            let mut payload_vector: heapless::Vec<u8, 128> = heapless::Vec::new();
+            payload_vector
+                .extend_from_slice(&payload.into_bytes())
+                .map_err(|_| eyre::eyre!("Can't create payload"))?;
+            send_command(
+                &mut port,
+                Command {
+                    destination: args.destination.into(),
+                    payload: rq2_telemetry_parser::Payload::Data(payload_vector),
+                },
+            )
+            .await?;
+            Ok(())
+        }
+        _ => {
+            let mut tdp = TestDataProcessor::default();
+            let mut command_processor = CommandProcessor::new(&mut tdp);
+            let mut incoming_processor = IncomingDataProcessor::new(&mut parser);
+            let command = command_processor
+                .create_and_expect_command(
+                    args.destination.into(),
+                    match args.command {
+                        Commands::Ping => Request::Ping,
+                        Commands::StartSending => Request::Send,
+                        Commands::Configure {
+                            spreading_factor,
+                            bandwidth,
+                            coding_rate,
+                            output_power,
+                            frequency,
+                        } => Request::Configure {
                             bandwidth: bandwidth.into(),
                             spreading_factor: spreading_factor.into(),
                             coding_rate: coding_rate.into(),
                             output_power,
                             frequency,
-                        }
-                    }
-                    Commands::Send { .. } => unreachable!(),
-                },
-            )
-            .await
-            .map_err(|_| eyre::eyre!("Can't process request!"))?;
-        debug!("command: {:#?}", command);
-        send_command(&mut port, command).await?;
-        receive_command(&mut port, &mut incoming_processor, &mut command_processor).await
+                        },
+                        Commands::Receive => Request::Receive,
+                        Commands::AirLoop { .. } => unreachable!(),
+                        Commands::Send { .. } => unreachable!(),
+                    },
+                )
+                .await
+                .map_err(|_| eyre::eyre!("Can't process request!"))?;
+            debug!("command: {:#?}", command);
+            send_command(&mut port, command).await?;
+            receive_command(&mut port, &mut incoming_processor, &mut command_processor).await?;
+            Ok(())
+        }
     }
 }
 

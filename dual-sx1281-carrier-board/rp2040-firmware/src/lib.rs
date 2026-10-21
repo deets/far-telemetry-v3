@@ -15,6 +15,7 @@ use lora_phy::mod_traits::RadioKind;
 use lora_phy::sx128x::{Sx1281, Sx128x};
 use lora_phy::DelayNs;
 use lora_phy::LoRa;
+use rq2_telemetry_parser::ErrorCode::InvalidCommand;
 use rq2_telemetry_parser::{
     Bandwidth as Rq2Bandwidth, CodingRate as Rq2CodingRate, Command, ErrorCode, Mode, Module,
     Request, Response, SpreadingFactor as Rq2SpreadingFactor,
@@ -88,6 +89,17 @@ where
     output_power: i32,
 }
 
+struct LoraReceivingManager<RK, DLY>
+where
+    RK: RadioKind,
+    DLY: DelayNs,
+{
+    lora: LoRa<RK, DLY>,
+    configuration: LoRaConfiguration,
+    destination: Module,
+    rx_packet_params: PacketParams,
+}
+
 enum CommandResult<RK, DLY>
 where
     RK: RadioKind,
@@ -95,6 +107,7 @@ where
 {
     Configuration(LoraConfigurationManager<RK, DLY>),
     Sending(LoraSendingManager<RK, DLY>),
+    Receiving(LoraReceivingManager<RK, DLY>),
 }
 
 impl From<RadioError> for Error {
@@ -157,6 +170,11 @@ where
                                 send_response(sender, self.destination, command_id, Response::Pong)
                                     .await?;
                             }
+                            Request::Stop => {
+                                send_response(sender, self.destination, command_id, Response::Ack)
+                                    .await?;
+                                break;
+                            }
                             Request::Status => {
                                 send_response(
                                     sender,
@@ -194,6 +212,93 @@ where
                         .await?;
                     self.lora.tx().await?;
                 }
+            }
+        }
+        Ok(LoraConfigurationManager {
+            lora: self.lora,
+            configuration: Some(self.configuration),
+            destination: self.destination,
+        })
+    }
+}
+
+impl<RK, DLY> LoraReceivingManager<RK, DLY>
+where
+    RK: RadioKind,
+    DLY: DelayNs,
+{
+    async fn receive(
+        mut self,
+        receiver: &mut Receiver<'static, NoopRawMutex, Command, 4>,
+        sender: &mut Sender<'static, NoopRawMutex, Command, 4>,
+        payload_sender: &mut Sender<'static, NoopRawMutex, MessageType, 4>,
+    ) -> Result<LoraConfigurationManager<RK, DLY>, Error> {
+        error!("Start receiving data");
+        loop {
+            let mut buffer = [0; 255];
+            match select(
+                receiver.receive(),
+                self.lora.rx(&self.rx_packet_params, &mut buffer),
+            )
+            .await
+            {
+                embassy_futures::select::Either::First(command) => {
+                    match command.payload {
+                        rq2_telemetry_parser::Payload::Request {
+                            command_id,
+                            request,
+                        } => match request {
+                            Request::Ping => {
+                                send_response(sender, self.destination, command_id, Response::Pong)
+                                    .await?;
+                            }
+                            Request::Stop => {
+                                send_response(sender, self.destination, command_id, Response::Ack)
+                                    .await?;
+                                break;
+                            }
+                            Request::Status => {
+                                send_response(
+                                    sender,
+                                    self.destination,
+                                    command_id,
+                                    Response::Status(self.status()),
+                                )
+                                .await?;
+                            }
+                            _ => {
+                                send_response(
+                                    sender,
+                                    self.destination,
+                                    command_id,
+                                    Response::Error(ErrorCode::InvalidCommand),
+                                )
+                                .await?;
+                            }
+                        },
+                        // This is caught by the surrounding host interdace
+                        rq2_telemetry_parser::Payload::Data(items) => unreachable!(),
+                        rq2_telemetry_parser::Payload::Response { .. } => {
+                            error!("Received Response command");
+                        }
+                    }
+                }
+                embassy_futures::select::Either::Second(rx_result) => match rx_result {
+                    Ok((len, packet_status)) => {
+                        let mut message: MessageType = MessageType::new();
+                        match message.extend_from_slice(&buffer[0..len as usize]) {
+                            Ok(_) => match payload_sender.try_send(message) {
+                                Ok(_) => {}
+                                Err(_) => error!("Can't send payload"),
+                            },
+                            Err(_) => todo!(),
+                        }
+                    }
+                    Err(_) => {
+                        error!("Can't receive packet");
+                        break;
+                    }
+                },
             }
         }
         Ok(LoraConfigurationManager {
@@ -260,6 +365,49 @@ where
         }
     }
 
+    async fn start_receiving(
+        mut self,
+        sender: &mut Sender<'static, NoopRawMutex, Command, 4>,
+        command_id: u8,
+    ) -> Result<CommandResult<RK, DLY>, Error> {
+        if let Some(
+            configuration @ LoRaConfiguration {
+                bandwidth,
+                spreading_factor,
+                coding_rate,
+                frequency,
+                output_power,
+            },
+        ) = self.configuration
+        {
+            let modulation_params = self.lora.create_modulation_params(
+                spreading_factor,
+                bandwidth,
+                coding_rate,
+                frequency as u32,
+            )?;
+            let rx_packet_params =
+                self.lora
+                    .create_rx_packet_params(4, false, 140, true, true, &modulation_params)?;
+
+            self.lora
+                .prepare_for_rx(RxMode::Continuous, &modulation_params, &rx_packet_params)
+                .await?;
+
+            send_response(sender, self.destination, command_id, Response::Ack).await?;
+            Ok(CommandResult::Receiving(LoraReceivingManager {
+                configuration,
+                lora: self.lora,
+                destination: self.destination,
+                rx_packet_params,
+            }))
+        } else {
+            let response = Response::Error(ErrorCode::NoConfiguration);
+            send_response(sender, self.destination, command_id, response).await?;
+            Ok(CommandResult::Configuration(self))
+        }
+    }
+
     async fn process_command(
         mut self,
         sender: &mut Sender<'static, NoopRawMutex, Command, 4>,
@@ -298,7 +446,18 @@ where
                     .await?;
                     Ok(CommandResult::Configuration(self))
                 }
+                Request::Stop => {
+                    send_response(
+                        sender,
+                        self.destination,
+                        command_id,
+                        Response::Error(ErrorCode::InvalidCommand),
+                    )
+                    .await?;
+                    Ok(CommandResult::Configuration(self))
+                }
                 Request::Send => self.start_sending(sender, command_id).await,
+                Request::Receive => self.start_receiving(sender, command_id).await,
             },
             _ => {
                 error!(
@@ -335,6 +494,16 @@ where
     }
 }
 
+impl<RK, DLY> HasStatus for LoraReceivingManager<RK, DLY>
+where
+    RK: RadioKind,
+    DLY: DelayNs,
+{
+    fn status(&self) -> Mode {
+        Mode::RxContinuous
+    }
+}
+
 async fn send_response(
     sender: &mut Sender<'static, NoopRawMutex, Command, 4>,
     destination: rq2_telemetry_parser::Module,
@@ -357,6 +526,7 @@ async fn lora_work<RK: RadioKind, DLY: DelayNs>(
     mut receiver: Receiver<'static, NoopRawMutex, Command, 4>,
     mut sender: Sender<'static, NoopRawMutex, Command, 4>,
     mut payload_receiver: Receiver<'static, NoopRawMutex, MessageType, 4>,
+    mut payload_sender: Sender<'static, NoopRawMutex, MessageType, 4>,
 ) -> Result<(), Error> {
     loop {
         let command = receiver.receive().await;
@@ -365,6 +535,11 @@ async fn lora_work<RK: RadioKind, DLY: DelayNs>(
             CommandResult::Sending(lora_sending_manager) => {
                 lora_sending_manager
                     .send(&mut receiver, &mut sender, &mut payload_receiver)
+                    .await?
+            }
+            CommandResult::Receiving(lora_receiving_manager) => {
+                lora_receiving_manager
+                    .receive(&mut receiver, &mut sender, &mut payload_sender)
                     .await?
             }
         };
@@ -384,6 +559,7 @@ pub async fn lora1_task(
     receiver: Receiver<'static, NoopRawMutex, Command, 4>,
     sender: Sender<'static, NoopRawMutex, Command, 4>,
     payload_receiver: Receiver<'static, NoopRawMutex, MessageType, 4>,
+    payload_sender: Sender<'static, NoopRawMutex, MessageType, 4>,
 ) {
     let manager = LoraConfigurationManager {
         lora: lora1,
@@ -391,7 +567,7 @@ pub async fn lora1_task(
         destination: Module::Lora1,
     };
 
-    match lora_work(manager, receiver, sender, payload_receiver).await {
+    match lora_work(manager, receiver, sender, payload_receiver, payload_sender).await {
         Ok(_) => {}
         Err(e) => {
             error!(
@@ -415,13 +591,14 @@ pub async fn lora2_task(
     receiver: Receiver<'static, NoopRawMutex, Command, 4>,
     sender: Sender<'static, NoopRawMutex, Command, 4>,
     payload_receiver: Receiver<'static, NoopRawMutex, MessageType, 4>,
+    payload_sender: Sender<'static, NoopRawMutex, MessageType, 4>,
 ) {
     let manager = LoraConfigurationManager {
         lora: lora2,
         configuration: None,
         destination: Module::Lora2,
     };
-    match lora_work(manager, receiver, sender, payload_receiver).await {
+    match lora_work(manager, receiver, sender, payload_receiver, payload_sender).await {
         Ok(_) => {}
         Err(e) => {
             error!(
