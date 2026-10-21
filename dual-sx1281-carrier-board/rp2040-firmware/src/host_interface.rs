@@ -8,9 +8,11 @@ use embassy_sync::channel::{Receiver, Sender};
 use heapless::Vec;
 use postcard::to_vec;
 use rq2_telemetry_parser::{
-    encode_frame, seven_bit_encode, Command, FeedIncomingData, IncomingDataProcessor,
-    SelfContainedFrameParser,
+    encode_frame, seven_bit_encode, Command, FeedIncomingData, IncomingDataProcessor, Module,
+    Payload, SelfContainedFrameParser,
 };
+
+use crate::MessageType;
 
 async fn send_response<'a>(uart: &mut UartTx<'static, UART0, Async>, response: Command) {
     debug!("send_response::start");
@@ -31,6 +33,8 @@ pub async fn uart_task(
     uart: Uart<'static, UART0, Async>,
     lora1_sender: Sender<'static, NoopRawMutex, Command, 4>,
     lora1_receiver: Receiver<'static, NoopRawMutex, Command, 4>,
+    lora1_payload_sender: Sender<'static, NoopRawMutex, MessageType, 4>,
+    lora1_payload_receiver: Receiver<'static, NoopRawMutex, MessageType, 4>,
     lora2_sender: Sender<'static, NoopRawMutex, Command, 4>,
     lora2_receiver: Receiver<'static, NoopRawMutex, Command, 4>,
 ) {
@@ -44,14 +48,20 @@ pub async fn uart_task(
             Ok(_) => {
                 debug!("{}", buffer[0]);
                 match dispatcher.feed(buffer[0]).await {
+                    Ok(Some(Command {
+                        destination: Module::Lora1,
+                        payload: Payload::Data(data),
+                    })) => {
+                        let _ = lora1_payload_sender.try_send(data);
+                    }
                     Ok(Some(command)) => match command.destination {
-                        rq2_telemetry_parser::Module::Lora1 => {
+                        Module::Lora1 => {
                             debug!("sending command: {:#?}", defmt::Debug2Format(&command));
                             lora1_sender.send(command).await;
                             let response = lora1_receiver.receive().await;
                             send_response(&mut outgoing, response).await;
                         }
-                        rq2_telemetry_parser::Module::Lora2 => {
+                        Module::Lora2 => {
                             lora2_sender.send(command).await;
                             let response = lora2_receiver.receive().await;
                             send_response(&mut outgoing, response).await;

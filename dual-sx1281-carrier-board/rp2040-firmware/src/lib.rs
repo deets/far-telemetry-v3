@@ -1,5 +1,6 @@
 #![no_std]
 use defmt::{debug, error};
+use embassy_futures::select::select;
 use embassy_rp::gpio::{Input, Output};
 use embassy_rp::peripherals::{SPI0, SPI1};
 use embassy_rp::spi::{Async, Spi};
@@ -138,29 +139,30 @@ where
     RK: RadioKind,
     DLY: DelayNs,
 {
-    async fn send(mut self) -> Result<LoraConfigurationManager<RK, DLY>, Error> {
-        debug!("Sending one message");
+    async fn send(
+        mut self,
+        receiver: Receiver<'static, NoopRawMutex, Command, 4>,
+        mut sender: Sender<'static, NoopRawMutex, Command, 4>,
+        payload_receiver: Receiver<'static, NoopRawMutex, MessageType, 4>,
+    ) -> Result<LoraConfigurationManager<RK, DLY>, Error> {
         let buffer = b"DIEZ WAS HERE";
-        debug!(
-            "sending one packet: {:#?}, {:#?} {}",
-            defmt::Debug2Format(&DebugModulationParams {
-                modulation_params: &self.modulation_params
-            }),
-            defmt::Debug2Format(&DebugPacketParams {
-                packet_params: &self.tx_packet_params
-            }),
-            defmt::Debug2Format(&self.output_power)
-        );
-        self.lora
-            .prepare_for_tx(
-                &self.modulation_params,
-                &mut self.tx_packet_params,
-                self.output_power,
-                buffer,
-            )
-            .await?;
-        self.lora.tx().await?;
 
+        loop {
+            match select(receiver.receive(), payload_receiver.receive()).await {
+                embassy_futures::select::Either::First(command) => todo!(),
+                embassy_futures::select::Either::Second(payload) => {
+                    self.lora
+                        .prepare_for_tx(
+                            &self.modulation_params,
+                            &mut self.tx_packet_params,
+                            self.output_power,
+                            &payload,
+                        )
+                        .await?;
+                    self.lora.tx().await?;
+                }
+            }
+        }
         Ok(LoraConfigurationManager {
             lora: self.lora,
             configuration: Some(self.configuration),
@@ -311,12 +313,17 @@ async fn lora_work<RK: RadioKind, DLY: DelayNs>(
     mut manager: LoraConfigurationManager<RK, DLY>,
     receiver: Receiver<'static, NoopRawMutex, Command, 4>,
     mut sender: Sender<'static, NoopRawMutex, Command, 4>,
+    payload_receiver: Receiver<'static, NoopRawMutex, MessageType, 4>,
 ) -> Result<(), Error> {
     loop {
         let command = receiver.receive().await;
         manager = match manager.process_command(&mut sender, command).await? {
             CommandResult::Configuration(lora_configuration_manager) => lora_configuration_manager,
-            CommandResult::Sending(lora_sending_manager) => lora_sending_manager.send().await?,
+            CommandResult::Sending(lora_sending_manager) => {
+                lora_sending_manager
+                    .send(receiver, sender, payload_receiver)
+                    .await?
+            }
         };
     }
 }
@@ -333,6 +340,7 @@ pub async fn lora1_task(
     >,
     receiver: Receiver<'static, NoopRawMutex, Command, 4>,
     sender: Sender<'static, NoopRawMutex, Command, 4>,
+    payload_receiver: Receiver<'static, NoopRawMutex, MessageType, 4>,
 ) {
     let manager = LoraConfigurationManager {
         lora: lora1,
@@ -340,7 +348,7 @@ pub async fn lora1_task(
         destination: Module::Lora1,
     };
 
-    match lora_work(manager, receiver, sender).await {
+    match lora_work(manager, receiver, sender, payload_receiver).await {
         Ok(_) => {}
         Err(e) => {
             error!(
@@ -363,13 +371,14 @@ pub async fn lora2_task(
     >,
     receiver: Receiver<'static, NoopRawMutex, Command, 4>,
     sender: Sender<'static, NoopRawMutex, Command, 4>,
+    payload_receiver: Receiver<'static, NoopRawMutex, MessageType, 4>,
 ) {
     let manager = LoraConfigurationManager {
         lora: lora2,
         configuration: None,
         destination: Module::Lora2,
     };
-    match lora_work(manager, receiver, sender).await {
+    match lora_work(manager, receiver, sender, payload_receiver).await {
         Ok(_) => {}
         Err(e) => {
             error!(
@@ -379,54 +388,6 @@ pub async fn lora2_task(
         }
     }
 }
-
-// let mdltn_params = {
-//     match manager.create_modulation_params(
-//         SpreadingFactor::_12,
-//         Bandwidth::_400KHz,
-//         CodingRate::_4_7,
-//         LORA_FREQUENCY_IN_HZ,
-//     ) {
-//         Ok(mp) => mp,
-//         Err(err) => {
-//             info!("Radio error = {}", err);
-//             return;
-//         }
-//     }
-// };
-// info!("modulation params set");
-// let rx_pkt_params = {
-//     match lora2.create_rx_packet_params(4, false, 255, true, false, &mdltn_params) {
-//         Ok(pp) => pp,
-//         Err(err) => {
-//             info!("Radio error = {}", err);
-//             return;
-//         }
-//     }
-// };
-// info!("transmission params set");
-
-// let mut receiving_buffer = [00u8; 100];
-
-// match lora2
-//     .prepare_for_rx(RxMode::Continuous, &mdltn_params, &rx_pkt_params)
-//     .await
-// {
-//     Ok(()) => {}
-//     Err(err) => {
-//         info!("Radio error = {}", err);
-//         return;
-//     }
-// };
-// loop {
-//     match lora2.rx(&rx_pkt_params, &mut receiving_buffer).await {
-//         Ok((received_len, _rx_pkt_status)) => {
-//             error!("packet:{:?}", &receiving_buffer[0..received_len as usize]);
-//         }
-//         Err(err) => info!("rx unsuccessful = {}", err),
-//     }
-// }
-//}
 
 fn sf_convert(spreading_factor: Rq2SpreadingFactor) -> SpreadingFactor {
     match spreading_factor {
@@ -457,7 +418,17 @@ fn cr_convert(coding_rate: Rq2CodingRate) -> CodingRate {
     }
 }
 
+pub type MessageType = heapless::Vec<u8, 128>;
 pub static LORA1_SEND_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
 pub static LORA1_RECEIVE_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
 pub static LORA2_SEND_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
 pub static LORA2_RECEIVE_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
+
+pub static LORA1_PAYLOAD_SEND_CHANNEL: StaticCell<Channel<NoopRawMutex, MessageType, 4>> =
+    StaticCell::new();
+pub static LORA1_PAYLOAD_RECEIVE_CHANNEL: StaticCell<Channel<NoopRawMutex, MessageType, 4>> =
+    StaticCell::new();
+pub static LORA2_PAYLOAD_SEND_CHANNEL: StaticCell<Channel<NoopRawMutex, MessageType, 4>> =
+    StaticCell::new();
+pub static LORA2_PAYLOAD_RECEIVE_CHANNEL: StaticCell<Channel<NoopRawMutex, MessageType, 4>> =
+    StaticCell::new();

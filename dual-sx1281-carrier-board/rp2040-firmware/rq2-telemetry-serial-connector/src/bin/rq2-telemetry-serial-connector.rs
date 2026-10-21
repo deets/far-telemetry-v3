@@ -118,6 +118,9 @@ enum Commands {
         output_power: i32,
         frequency: usize,
     },
+    Send {
+        payload: String,
+    },
 }
 
 fn default_port() -> eyre::Result<String> {
@@ -220,38 +223,55 @@ async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
     debug!("serial_port: {serial_port}");
     let mut port = tokio_serial::new(serial_port, args.serial_speed).open_native_async()?;
     let mut parser = SelfContainedFrameParser::new();
-    let mut tdp = TestDataProcessor::default();
-    let mut command_processor = CommandProcessor::new(&mut tdp);
-    let mut incoming_processor = IncomingDataProcessor::new(&mut parser);
-    let command = command_processor
-        .create_and_expect_command(
-            args.destination.into(),
-            match args.command {
-                Commands::Ping => Request::Ping,
-                Commands::StartSending => Request::Send,
-                Commands::Configure {
-                    spreading_factor,
-                    bandwidth,
-                    coding_rate,
-                    output_power,
-                    frequency,
-                } => {
-                    debug!("Frequency set: {}", frequency);
-                    Request::Configure {
-                        bandwidth: bandwidth.into(),
-                        spreading_factor: spreading_factor.into(),
-                        coding_rate: coding_rate.into(),
-                        output_power,
-                        frequency,
-                    }
-                }
+    if let Commands::Send { payload } = args.command {
+        let mut payload_vector: heapless::Vec<u8, 128> = heapless::Vec::new();
+        payload_vector
+            .extend_from_slice(&payload.into_bytes())
+            .map_err(|_| eyre::eyre!("Can't create payload"))?;
+        send_command(
+            &mut port,
+            Command {
+                destination: args.destination.into(),
+                payload: rq2_telemetry_parser::Payload::Data(payload_vector),
             },
         )
-        .await
-        .map_err(|_| eyre::eyre!("Can't process request!"))?;
-    debug!("command: {:#?}", command);
-    send_command(&mut port, command).await?;
-    receive_command(&mut port, &mut incoming_processor, &mut command_processor).await
+        .await?;
+        Ok(())
+    } else {
+        let mut tdp = TestDataProcessor::default();
+        let mut command_processor = CommandProcessor::new(&mut tdp);
+        let mut incoming_processor = IncomingDataProcessor::new(&mut parser);
+        let command = command_processor
+            .create_and_expect_command(
+                args.destination.into(),
+                match args.command {
+                    Commands::Ping => Request::Ping,
+                    Commands::StartSending => Request::Send,
+                    Commands::Configure {
+                        spreading_factor,
+                        bandwidth,
+                        coding_rate,
+                        output_power,
+                        frequency,
+                    } => {
+                        debug!("Frequency set: {}", frequency);
+                        Request::Configure {
+                            bandwidth: bandwidth.into(),
+                            spreading_factor: spreading_factor.into(),
+                            coding_rate: coding_rate.into(),
+                            output_power,
+                            frequency,
+                        }
+                    }
+                    Commands::Send { .. } => unreachable!(),
+                },
+            )
+            .await
+            .map_err(|_| eyre::eyre!("Can't process request!"))?;
+        debug!("command: {:#?}", command);
+        send_command(&mut port, command).await?;
+        receive_command(&mut port, &mut incoming_processor, &mut command_processor).await
+    }
 }
 
 #[tokio::main(flavor = "current_thread")]

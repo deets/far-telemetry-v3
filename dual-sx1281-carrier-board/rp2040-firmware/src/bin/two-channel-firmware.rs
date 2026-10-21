@@ -5,9 +5,12 @@
 #![no_main]
 
 use defmt::*;
+use dual_sx1281_carrier_board::MessageType;
 use dual_sx1281_carrier_board::{
-    host_interface::uart_task, lora1_task, lora2_task, LORA1_RECEIVE_CHANNEL, LORA1_SEND_CHANNEL,
-    LORA2_RECEIVE_CHANNEL, LORA2_SEND_CHANNEL,
+    host_interface::uart_task, lora1_task, lora2_task, LORA1_PAYLOAD_RECEIVE_CHANNEL,
+    LORA1_PAYLOAD_SEND_CHANNEL, LORA1_RECEIVE_CHANNEL, LORA1_SEND_CHANNEL,
+    LORA2_PAYLOAD_RECEIVE_CHANNEL, LORA2_PAYLOAD_SEND_CHANNEL, LORA2_RECEIVE_CHANNEL,
+    LORA2_SEND_CHANNEL,
 };
 use embassy_executor::Spawner;
 use embassy_rp::bind_interrupts;
@@ -123,6 +126,13 @@ async fn main(spawner: Spawner) {
     let lora1_receive_channel = Channel::<NoopRawMutex, Command, 4>::new();
     let static_lora1_receive_channel = LORA1_RECEIVE_CHANNEL.init(lora1_receive_channel);
 
+    let lora1_payload_send_channel = Channel::<NoopRawMutex, MessageType, 4>::new();
+    let static_payload_lora1_send_channel =
+        LORA1_PAYLOAD_SEND_CHANNEL.init(lora1_payload_send_channel);
+    let lora1_payload_receive_channel = Channel::<NoopRawMutex, MessageType, 4>::new();
+    let static_payload_lora1_receive_channel =
+        LORA1_PAYLOAD_RECEIVE_CHANNEL.init(lora1_payload_receive_channel);
+
     let lora2 = LoRa::new(Sx128x::new(lora2_spi, lora2_iv, lora2_config), false, Delay)
         .await
         .unwrap();
@@ -131,11 +141,19 @@ async fn main(spawner: Spawner) {
     let lora2_receive_channel = Channel::<NoopRawMutex, Command, 4>::new();
     let static_lora2_receive_channel = LORA2_RECEIVE_CHANNEL.init(lora2_receive_channel);
 
+    let lora2_payload_send_channel = Channel::<NoopRawMutex, MessageType, 4>::new();
+    let static_payload_lora2_send_channel =
+        LORA2_PAYLOAD_SEND_CHANNEL.init(lora2_payload_send_channel);
+    let lora2_payload_receive_channel = Channel::<NoopRawMutex, MessageType, 4>::new();
+    let static_payload_lora2_receive_channel =
+        LORA2_PAYLOAD_RECEIVE_CHANNEL.init(lora2_payload_receive_channel);
+
     spawner
         .spawn(lora1_task(
             lora1,
             static_lora1_send_channel.receiver(),
             static_lora1_receive_channel.sender(),
+            static_payload_lora1_send_channel.receiver(),
         ))
         .expect("Can't spawn receiver task");
 
@@ -144,6 +162,7 @@ async fn main(spawner: Spawner) {
             lora2,
             static_lora2_send_channel.receiver(),
             static_lora2_receive_channel.sender(),
+            static_payload_lora2_send_channel.receiver(),
         ))
         .expect("Can't spawn receiver task");
 
@@ -151,6 +170,8 @@ async fn main(spawner: Spawner) {
         uart,
         static_lora1_send_channel.sender(),
         static_lora1_receive_channel.receiver(),
+        static_payload_lora1_send_channel.sender(),
+        static_payload_lora1_receive_channel.receiver(),
         static_lora2_send_channel.sender(),
         static_lora2_receive_channel.receiver(),
     )
