@@ -135,37 +135,27 @@ pub fn seven_bit_encode<'a>(
     if byte_count > buffer.len() {
         return Err(SevenBitTranscoderError::BufferOverflow);
     }
-    // This is a rather stupid implementation, as it accesses
-    // every byte usually twice, instead of using a buffer and
-    // shifting bits in and out - but I've wasted a bit of time
-    // on that, and correctness trumps speed for now.
+    let mut incoming_index = 0;
+    let mut accu = (incoming[incoming_index] as u16) << 8;
+    incoming_index += 1;
+    let mut bits_available = 8;
+
     for i in 0..byte_count {
-        let bit_index_start = i * 7;
-        let bit_index_end = bit_index_start + 6;
-        let byte_index_start = bit_index_start >> 3;
-        let byte_index_end = bit_index_end >> 3;
-        // #[cfg(test)]
-        // std::println!(
-        //     "{i} -> {bit_index_start}/{byte_index_start} - {bit_index_end}/{byte_index_end} "
-        // );
-        // We are fully within one bytes
-        let value = if byte_index_start == byte_index_end {
-            // depending on offset, consider upper/lower 7 bits.
-            (incoming[byte_index_start] >> (byte_index_start % 2)) & 0x7F
-        } else {
-            let shift = i % 8;
-            // #[cfg(test)]
-            // std::println!("{i}: {shift}");
-            let upper = (incoming[byte_index_start] << (7 - shift)) & 0x7F;
-            // it's possible to point beyond the last byte, then fill with zero
-            let lower = if byte_index_end < incoming.len() {
-                incoming[byte_index_end] >> (shift + 1)
-            } else {
-                0
-            };
-            upper | lower
-        };
-        buffer[i] = value;
+        #[cfg(test)]
+        std::println!("shift {i} -> {accu:016b}");
+        buffer[i] = (accu >> 9) as u8;
+        accu <<= 7;
+        bits_available += 7;
+        #[cfg(test)]
+        std::println!("{bits_available} -> {accu:016b}");
+        while bits_available >= 8 && incoming_index < incoming.len() {
+            let value = incoming[incoming_index] as u16;
+            #[cfg(test)]
+            std::println!("fill -> {value:016b}");
+            incoming_index += 1;
+            accu |= value << (bits_available - 8);
+            bits_available -= 8;
+        }
     }
     Ok(&buffer[0..byte_count])
 }
@@ -187,24 +177,21 @@ pub fn seven_bit_decode<'a>(
         buffer[0] = incoming[0] << 1;
         return Ok(&buffer[0..1]);
     }
-    // Ensure we have no polluted data
-    buffer.fill(0);
-    for i in 0..byte_count {
-        let bit_index_start = i * 8;
-        let bit_index_end = bit_index_start + 7;
-        let byte_index_start = bit_index_start / 7;
-        let byte_index_end = bit_index_end / 7;
-        let shift = (i + 1) % 7;
-        if shift == 0 {
-            buffer[i] = incoming[byte_index_start + 1] & 0x7f;
-        } else {
-            let rs = 7 - shift;
-            #[cfg(test)]
-            std::println!(
-            "{i} -> {bit_index_start}/{byte_index_start} - {bit_index_end}/{byte_index_end}, shift: {shift} "
-        );
-            buffer[i] |= incoming[byte_index_start] << shift;
-            buffer[i] |= incoming[byte_index_end] >> rs;
+    let mut accu: u16 = 0;
+    let mut bits_available = 0;
+    let mut out_index = 0;
+    for b in incoming {
+        let shift = 16 - bits_available - 7;
+        let value = (*b as u16) << shift;
+        #[cfg(test)]
+        std::println!("{accu:016b}, {shift}, {value:016b}");
+        accu |= value;
+        bits_available += 7;
+        while bits_available >= 8 {
+            buffer[out_index] = (accu >> 8) as u8;
+            out_index += 1;
+            accu <<= 8;
+            bits_available -= 8;
         }
     }
     Ok(&buffer[0..byte_count])
@@ -218,11 +205,17 @@ mod tests {
     fn transcode_large_buffer() {
         let mut encode_buffer = [0; 1024];
         let mut decode_buffer = [0; 1024];
-        let mut data = [0; 14];
+        let mut data = [0; 16];
         for (i, c) in data.iter_mut().enumerate() {
             *c = i as u8;
         }
         let encoded = seven_bit_encode(&mut encode_buffer, &data).unwrap();
+        std::println!("{encoded:#?}");
+        assert_eq!(
+            &[0, 0, 32, 32, 24, 16, 10, 6, 3, 66, 1, 16, 80, 44, 24, 13, 7, 3, 96],
+            encoded
+        );
+
         assert_eq!(
             data.as_slice(),
             seven_bit_decode(&mut decode_buffer, encoded).unwrap()
@@ -247,6 +240,7 @@ mod tests {
         let mut buffer = [0; 1024];
         let message = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
         let encoded = seven_bit_encode(&mut buffer, &message).expect("Encoding error");
+        assert_eq!(&[127, 127, 127, 127, 127, 127, 127, 127, 127, 64], encoded);
 
         let mut decode_buffer = [0; 1024];
         assert_eq!(
