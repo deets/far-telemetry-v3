@@ -37,6 +37,8 @@ pub async fn uart_task(
     lora1_payload_receiver: Receiver<'static, NoopRawMutex, MessageType, 4>,
     lora2_sender: Sender<'static, NoopRawMutex, Command, 4>,
     lora2_receiver: Receiver<'static, NoopRawMutex, Command, 4>,
+    lora2_payload_sender: Sender<'static, NoopRawMutex, MessageType, 4>,
+    lora2_payload_receiver: Receiver<'static, NoopRawMutex, MessageType, 4>,
 ) {
     let mut parser = SelfContainedFrameParser::new();
     let mut dispatcher = IncomingDataProcessor::new(&mut parser);
@@ -53,6 +55,12 @@ pub async fn uart_task(
                         payload: Payload::Data(data),
                     })) => {
                         let _ = lora1_payload_sender.try_send(data);
+                    }
+                    Ok(Some(Command {
+                        destination: Module::Lora2,
+                        payload: Payload::Data(data),
+                    })) => {
+                        let _ = lora2_payload_sender.try_send(data);
                     }
                     Ok(Some(command)) => match command.destination {
                         Module::Lora1 => {

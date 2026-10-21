@@ -114,6 +114,7 @@ pub enum Request {
 pub enum ErrorCode {
     CantSetConfiguration,
     NoConfiguration,
+    InvalidCommand,
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Copy, Clone)]

@@ -174,6 +174,8 @@ async fn main(spawner: Spawner) {
         static_payload_lora1_receive_channel.receiver(),
         static_lora2_send_channel.sender(),
         static_lora2_receive_channel.receiver(),
+        static_payload_lora2_send_channel.sender(),
+        static_payload_lora2_receive_channel.receiver(),
     )
     .await;
     loop {

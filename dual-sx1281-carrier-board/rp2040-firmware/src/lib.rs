@@ -141,15 +141,48 @@ where
 {
     async fn send(
         mut self,
-        receiver: Receiver<'static, NoopRawMutex, Command, 4>,
-        mut sender: Sender<'static, NoopRawMutex, Command, 4>,
-        payload_receiver: Receiver<'static, NoopRawMutex, MessageType, 4>,
+        receiver: &mut Receiver<'static, NoopRawMutex, Command, 4>,
+        sender: &mut Sender<'static, NoopRawMutex, Command, 4>,
+        payload_receiver: &mut Receiver<'static, NoopRawMutex, MessageType, 4>,
     ) -> Result<LoraConfigurationManager<RK, DLY>, Error> {
-        let buffer = b"DIEZ WAS HERE";
-
         loop {
             match select(receiver.receive(), payload_receiver.receive()).await {
-                embassy_futures::select::Either::First(command) => todo!(),
+                embassy_futures::select::Either::First(command) => {
+                    match command.payload {
+                        rq2_telemetry_parser::Payload::Request {
+                            command_id,
+                            request,
+                        } => match request {
+                            Request::Ping => {
+                                send_response(sender, self.destination, command_id, Response::Pong)
+                                    .await?;
+                            }
+                            Request::Status => {
+                                send_response(
+                                    sender,
+                                    self.destination,
+                                    command_id,
+                                    Response::Status(self.status()),
+                                )
+                                .await?;
+                            }
+                            _ => {
+                                send_response(
+                                    sender,
+                                    self.destination,
+                                    command_id,
+                                    Response::Error(ErrorCode::InvalidCommand),
+                                )
+                                .await?;
+                            }
+                        },
+                        // This is caught by the surrounding host interdace
+                        rq2_telemetry_parser::Payload::Data(items) => unreachable!(),
+                        rq2_telemetry_parser::Payload::Response { .. } => {
+                            error!("Received Response command");
+                        }
+                    }
+                }
                 embassy_futures::select::Either::Second(payload) => {
                     self.lora
                         .prepare_for_tx(
@@ -292,6 +325,16 @@ where
     }
 }
 
+impl<RK, DLY> HasStatus for LoraSendingManager<RK, DLY>
+where
+    RK: RadioKind,
+    DLY: DelayNs,
+{
+    fn status(&self) -> Mode {
+        Mode::Tx
+    }
+}
+
 async fn send_response(
     sender: &mut Sender<'static, NoopRawMutex, Command, 4>,
     destination: rq2_telemetry_parser::Module,
@@ -311,9 +354,9 @@ async fn send_response(
 
 async fn lora_work<RK: RadioKind, DLY: DelayNs>(
     mut manager: LoraConfigurationManager<RK, DLY>,
-    receiver: Receiver<'static, NoopRawMutex, Command, 4>,
+    mut receiver: Receiver<'static, NoopRawMutex, Command, 4>,
     mut sender: Sender<'static, NoopRawMutex, Command, 4>,
-    payload_receiver: Receiver<'static, NoopRawMutex, MessageType, 4>,
+    mut payload_receiver: Receiver<'static, NoopRawMutex, MessageType, 4>,
 ) -> Result<(), Error> {
     loop {
         let command = receiver.receive().await;
@@ -321,7 +364,7 @@ async fn lora_work<RK: RadioKind, DLY: DelayNs>(
             CommandResult::Configuration(lora_configuration_manager) => lora_configuration_manager,
             CommandResult::Sending(lora_sending_manager) => {
                 lora_sending_manager
-                    .send(receiver, sender, payload_receiver)
+                    .send(&mut receiver, &mut sender, &mut payload_receiver)
                     .await?
             }
         };
