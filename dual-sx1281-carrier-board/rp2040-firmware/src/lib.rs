@@ -4,7 +4,7 @@ use embassy_rp::gpio::{Input, Output};
 use embassy_rp::peripherals::{SPI0, SPI1};
 use embassy_rp::spi::{Async, Spi};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embassy_sync::channel::{Receiver, Sender};
+use embassy_sync::channel::{Channel, Receiver, Sender};
 use embassy_time::Delay;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use lora_phy::iv::GenericSx128xInterfaceVariant;
@@ -18,6 +18,7 @@ use rq2_telemetry_parser::{
     Bandwidth as Rq2Bandwidth, CodingRate as Rq2CodingRate, Command, ErrorCode, Mode, Module,
     Request, Response, SpreadingFactor as Rq2SpreadingFactor,
 };
+use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
 pub mod host_interface;
@@ -455,3 +456,8 @@ fn cr_convert(coding_rate: Rq2CodingRate) -> CodingRate {
         Rq2CodingRate::_4_8 => CodingRate::_4_8,
     }
 }
+
+pub static LORA1_SEND_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
+pub static LORA1_RECEIVE_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
+pub static LORA2_SEND_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
+pub static LORA2_RECEIVE_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();

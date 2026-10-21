@@ -5,6 +5,10 @@
 #![no_main]
 
 use defmt::*;
+use dual_sx1281_carrier_board::{
+    host_interface::uart_task, lora1_task, lora2_task, LORA1_RECEIVE_CHANNEL, LORA1_SEND_CHANNEL,
+    LORA2_RECEIVE_CHANNEL, LORA2_SEND_CHANNEL,
+};
 use embassy_executor::Spawner;
 use embassy_rp::bind_interrupts;
 use embassy_rp::gpio::{Input, Level, Output, Pin, Pull};
@@ -18,20 +22,12 @@ use embedded_hal_bus::spi::ExclusiveDevice;
 use lora_phy::iv::GenericSx128xInterfaceVariant;
 use lora_phy::sx128x::{self, Sx1281, Sx128x};
 use lora_phy::LoRa;
-use rf_range_test::host_interface::uart_task;
-use rf_range_test::{lora1_task, lora2_task};
 use rq2_telemetry_parser::Command;
-use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
     UART0_IRQ => InterruptHandler<UART0>;
 });
-
-static LORA1_SEND_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
-static LORA1_RECEIVE_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
-static LORA2_SEND_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
-static LORA2_RECEIVE_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {

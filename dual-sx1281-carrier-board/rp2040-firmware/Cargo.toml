@@ -7,7 +7,7 @@ members = [
 
 [package]
 edition = "2021"
-name = "rf-range-test"
+name = "dual-sx1281-carrier-board"
 version = "0.1.0"
 license = "MIT OR Apache-2.0"
 
