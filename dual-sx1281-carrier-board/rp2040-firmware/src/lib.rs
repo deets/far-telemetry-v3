@@ -264,8 +264,13 @@ where
                 }
                 Request::Send => self.start_sending(sender, command_id).await,
             },
-            rq2_telemetry_parser::Payload::Data(..) => todo!(),
-            rq2_telemetry_parser::Payload::Response { .. } => todo!(),
+            _ => {
+                error!(
+                    "Received unexpected command: {:#?}",
+                    defmt::Debug2Format(&command)
+                );
+                Ok(CommandResult::Configuration(self))
+            }
         }
     }
 }
@@ -317,7 +322,7 @@ async fn lora_work<RK: RadioKind, DLY: DelayNs>(
 
 #[embassy_executor::task]
 pub async fn lora1_task(
-    mut lora1: LoRa<
+    lora1: LoRa<
         Sx128x<
             ExclusiveDevice<Spi<'static, SPI0, Async>, Output<'static>, Delay>,
             GenericSx128xInterfaceVariant<Output<'static>, Input<'static>>,

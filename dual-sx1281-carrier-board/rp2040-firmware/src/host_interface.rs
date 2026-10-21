@@ -8,22 +8,9 @@ use embassy_sync::channel::{Receiver, Sender};
 use heapless::Vec;
 use postcard::to_vec;
 use rq2_telemetry_parser::{
-    encode_frame, seven_bit_encode, Command, FeedIncomingData, FrameError, FrameResult,
-    IncomingDataProcessor, Payload, Request, Response, SelfContainedFrameParser,
+    encode_frame, seven_bit_encode, Command, FeedIncomingData, IncomingDataProcessor,
+    SelfContainedFrameParser,
 };
-
-async fn process_incoming(result: Result<FrameResult<'_>, FrameError>) {
-    match result {
-        Ok(result) => match result {
-            FrameResult::Nothing => {}
-            FrameResult::Frame(data) => {
-                debug!("got data: {:?}", data);
-            }
-        },
-        Err(FrameError::ShortFrame) => debug!("ignoring short frame"),
-        Err(e) => error!("Got error: {:?}", defmt::Debug2Format(&e)),
-    }
-}
 
 async fn send_response<'a>(uart: &mut UartTx<'static, UART0, Async>, response: Command) {
     debug!("send_response::start");

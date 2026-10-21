@@ -8,17 +8,16 @@ use defmt::*;
 use embassy_executor::Spawner;
 use embassy_rp::bind_interrupts;
 use embassy_rp::gpio::{Input, Level, Output, Pin, Pull};
-use embassy_rp::peripherals::{SPI0, UART0};
-use embassy_rp::spi::{Async, Config, Spi};
+use embassy_rp::peripherals::UART0;
+use embassy_rp::spi::{Config, Spi};
 use embassy_rp::uart::{Config as UartConfig, InterruptHandler, Uart};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use lora_phy::iv::GenericSx128xInterfaceVariant;
-use lora_phy::sx128x::{Sx1281, Sx128x};
+use lora_phy::sx128x::{self, Sx1281, Sx128x};
 use lora_phy::LoRa;
-use lora_phy::{mod_params::*, sx128x};
 use rf_range_test::host_interface::uart_task;
 use rf_range_test::{lora1_task, lora2_task};
 use rq2_telemetry_parser::Command;
@@ -28,8 +27,6 @@ use {defmt_rtt as _, panic_probe as _};
 bind_interrupts!(struct Irqs {
     UART0_IRQ => InterruptHandler<UART0>;
 });
-
-const LORA_FREQUENCY_IN_HZ: u32 = 2_450_000_000; // warning: set this appropriately for the region
 
 static LORA1_SEND_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
 static LORA1_RECEIVE_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
@@ -163,79 +160,6 @@ async fn main(spawner: Spawner) {
     )
     .await;
     loop {
-        Timer::after_millis(10).await;
-    }
-}
-
-#[embassy_executor::task]
-async fn sender_task(
-    mut lora1: LoRa<
-        Sx128x<
-            ExclusiveDevice<Spi<'static, SPI0, Async>, Output<'static>, Delay>,
-            GenericSx128xInterfaceVariant<Output<'static>, Input<'static>>,
-            Sx1281,
-        >,
-        Delay,
-    >,
-) {
-    let mdltn_params = {
-        match lora1.create_modulation_params(
-            SpreadingFactor::_12,
-            Bandwidth::_400KHz,
-            CodingRate::_4_7,
-            LORA_FREQUENCY_IN_HZ,
-        ) {
-            Ok(mp) => mp,
-            Err(err) => {
-                info!("Radio error = {}", err);
-                return;
-            }
-        }
-    };
-    info!("modulation params set");
-    let mut tx_pkt_params = {
-        match lora1.create_tx_packet_params(4, false, true, false, &mdltn_params) {
-            Ok(pp) => pp,
-            Err(err) => {
-                info!("Radio error = {}", err);
-                return;
-            }
-        }
-    };
-    info!("transmission params set");
-    let mut buffer = [0x00; 64];
-    let mut packet_count = 0xf0;
-    loop {
-        info!("prepare send packet");
-        for b in buffer.iter_mut() {
-            *b = packet_count as u8;
-        }
-        packet_count += 1;
-        match lora1
-            .prepare_for_tx(&mdltn_params, &mut tx_pkt_params, 10, &buffer)
-            .await
-        {
-            Ok(()) => {}
-            Err(err) => {
-                info!("Radio error = {}", err);
-                return;
-            }
-        };
-        info!("transmit");
-        match lora1.tx().await {
-            Ok(()) => {
-                info!("TX DONE");
-            }
-            Err(err) => {
-                info!("Radio error = {}", err);
-                return;
-            }
-        };
-
-        match lora1.sleep(false).await {
-            Ok(()) => info!("Sleep successful"),
-            Err(err) => info!("Sleep unsuccessful = {}", err),
-        }
         Timer::after_millis(10).await;
     }
 }
