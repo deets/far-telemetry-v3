@@ -21,7 +21,7 @@
       "footprints": true,
       "graphics": true,
       "keepouts": true,
-      "lockedItems": false,
+      "lockedItems": true,
       "otherItems": true,
       "pads": true,
       "text": true,
@@ -53,7 +53,7 @@
       "board_outline_area",
       "ly_points"
     ],
-    "visible_layers": "ffffffff_ffffffff_ffffdfff_ffffffff",
+    "visible_layers": "ffffffff_ffffffff_ffffdff7_ffffffff",
     "zone_display_mode": 1
   },
   "git": {

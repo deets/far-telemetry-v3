@@ -268,7 +268,7 @@
 			)
 			(embedded_fonts no)
 		)
-		(symbol "Connector_Generic:Conn_01x05"
+		(symbol "Connector_Generic:Conn_01x06"
 			(pin_names
 				(offset 1.016)
 				(hide yes)
@@ -288,8 +288,8 @@
 					)
 				)
 			)
-			(property "Value" "Conn_01x05"
-				(at 0 -7.62 0)
+			(property "Value" "Conn_01x06"
+				(at 0 -10.16 0)
 				(show_name no)
 				(do_not_autoplace no)
 				(effects
@@ -320,7 +320,7 @@
 					)
 				)
 			)
-			(property "Description" "Generic connector, single row, 01x05, script generated (kicad-library-utils/schlib/autogen/connector/)"
+			(property "Description" "Generic connector, single row, 01x06, script generated (kicad-library-utils/schlib/autogen/connector/)"
 				(at 0 0 0)
 				(show_name no)
 				(do_not_autoplace no)
@@ -353,10 +353,10 @@
 					)
 				)
 			)
-			(symbol "Conn_01x05_1_1"
+			(symbol "Conn_01x06_1_1"
 				(rectangle
 					(start -1.27 6.35)
-					(end 1.27 -6.35)
+					(end 1.27 -8.89)
 					(stroke
 						(width 0.254)
 						(type default)
@@ -412,6 +412,17 @@
 				(rectangle
 					(start -1.27 -4.953)
 					(end 0 -5.207)
+					(stroke
+						(width 0.1524)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(rectangle
+					(start -1.27 -7.493)
+					(end 0 -7.747)
 					(stroke
 						(width 0.1524)
 						(type default)
@@ -503,6 +514,24 @@
 						)
 					)
 					(number "5"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin passive line
+					(at -5.08 -7.62 0)
+					(length 3.81)
+					(name "Pin_6"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "6"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -4300,6 +4329,16 @@
 	)
 	(wire
 		(pts
+			(xy 102.87 142.24) (xy 102.87 148.59)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "5c83a5f4-a21b-4d28-9219-700bddfe6e58")
+	)
+	(wire
+		(pts
 			(xy 245.11 129.54) (xy 247.65 129.54)
 		)
 		(stroke
@@ -4477,6 +4516,16 @@
 			(type default)
 		)
 		(uuid "89667bf3-b680-43e8-891c-6c09b7112c06")
+	)
+	(wire
+		(pts
+			(xy 116.84 148.59) (xy 102.87 148.59)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "8df6e12a-fc1b-4429-980c-911266171c00")
 	)
 	(wire
 		(pts
@@ -4817,6 +4866,16 @@
 			(type default)
 		)
 		(uuid "f4949565-3d90-4a78-b16a-dc3d5e7fc39d")
+	)
+	(wire
+		(pts
+			(xy 116.84 142.24) (xy 116.84 148.59)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "f535c43b-d2ac-45f9-94f0-360807d20560")
 	)
 	(wire
 		(pts
@@ -6428,6 +6487,84 @@
 		)
 	)
 	(symbol
+		(lib_id "power:+3V3")
+		(at 102.87 142.24 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "32b16efa-b7f8-4a74-bc82-0a0cf5acb725")
+		(property "Reference" "#PWR030"
+			(at 102.87 146.05 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "+3V3"
+			(at 102.87 137.16 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 102.87 142.24 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 102.87 142.24 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"+3V3\""
+			(at 102.87 142.24 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "89b7a3c1-ba54-4c2a-9eba-52c5fd214a0b")
+		)
+		(instances
+			(project "dual-sx1281-carrier-board"
+				(path "/dd3d82ed-b0ea-48bf-93b4-f28bcc2a961e"
+					(reference "#PWR030")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "power:GND")
 		(at 242.57 85.09 0)
 		(unit 1)
@@ -7745,6 +7882,99 @@
 		)
 	)
 	(symbol
+		(lib_id "Connector_Generic:Conn_01x06")
+		(at 111.76 134.62 0)
+		(mirror y)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "72e37f17-2864-47f7-a53f-fd26b64e2e21")
+		(property "Reference" "J6"
+			(at 111.76 123.19 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "Conn_01x06"
+			(at 111.76 125.73 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Connector_Molex:Molex_PicoBlade_53398-0671_1x06-1MP_P1.25mm_Vertical"
+			(at 111.76 134.62 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 111.76 134.62 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Generic connector, single row, 01x06, script generated (kicad-library-utils/schlib/autogen/connector/)"
+			(at 111.76 134.62 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "b7fb5e50-bb02-498e-b0e4-c2b5ca00f612")
+		)
+		(pin "2"
+			(uuid "002c388e-c0c9-4012-8464-2f9092509def")
+		)
+		(pin "6"
+			(uuid "5c8ac570-772f-42bc-87bb-9e584eee541d")
+		)
+		(pin "3"
+			(uuid "fe3f9ef4-23f0-4ede-9721-615db5935ce9")
+		)
+		(pin "4"
+			(uuid "f435190b-1256-4b4b-a5c5-d8dbdfa1a4e2")
+		)
+		(pin "5"
+			(uuid "23a14cb3-d621-4e54-9c97-43d45e8dcbd5")
+		)
+		(instances
+			(project "dual-sx1281-carrier-board"
+				(path "/dd3d82ed-b0ea-48bf-93b4-f28bcc2a961e"
+					(reference "J6")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "deets kicad lib:E28-2G4M20SX")
 		(at 246.38 66.04 0)
 		(unit 1)
@@ -7952,96 +8182,6 @@
 			(project "dual-sx1281-carrier-board"
 				(path "/dd3d82ed-b0ea-48bf-93b4-f28bcc2a961e"
 					(reference "#PWR016")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Connector_Generic:Conn_01x05")
-		(at 111.76 134.62 0)
-		(mirror y)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "7869dc07-c1d7-48c3-a657-a2f4f1cac17f")
-		(property "Reference" "J1"
-			(at 111.76 123.19 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "Conn_01x05"
-			(at 111.76 125.73 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" "Connector_Molex:Molex_PicoBlade_53398-0571_1x05-1MP_P1.25mm_Vertical"
-			(at 111.76 134.62 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 111.76 134.62 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Generic connector, single row, 01x05, script generated (kicad-library-utils/schlib/autogen/connector/)"
-			(at 111.76 134.62 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "4"
-			(uuid "d8c66ab8-47b2-44ef-b761-4142cb8dfa2b")
-		)
-		(pin "2"
-			(uuid "8168ed0c-407c-4254-8710-133a10e6cff1")
-		)
-		(pin "1"
-			(uuid "4f443e67-f88c-469b-b910-5aef45fcd5cb")
-		)
-		(pin "3"
-			(uuid "81adae41-81de-423f-b9da-2b1d67f58df5")
-		)
-		(pin "5"
-			(uuid "10a9bd08-64ed-47f9-8857-e681e15f1852")
-		)
-		(instances
-			(project "dual-sx1281-carrier-board"
-				(path "/dd3d82ed-b0ea-48bf-93b4-f28bcc2a961e"
-					(reference "J1")
 					(unit 1)
 				)
 			)
