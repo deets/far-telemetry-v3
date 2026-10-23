@@ -3047,9 +3047,9 @@ dependencies = [
 
 [[package]]
 name = "smtc-modem-cores-sys"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "613ad0c48fa1926e9be946e44202a746fd03adfcc837ff4ed2a12ad96da58c5e"
+checksum = "2f6b5a613728e17e2e0e424f2648cc5c01fb17ecfb92dfea4c8067de75db552c"
 dependencies = [
  "bindgen",
  "cmake",

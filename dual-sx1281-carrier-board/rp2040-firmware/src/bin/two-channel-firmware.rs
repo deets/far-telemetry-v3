@@ -34,6 +34,7 @@ bind_interrupts!(struct Irqs {
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
+    info!("running");
     let p = embassy_rp::init(Default::default());
 
     let lora1_nss = Output::new(p.PIN_5.degrade(), Level::High);
@@ -63,14 +64,12 @@ async fn main(spawner: Spawner) {
         p.DMA_CH1,
         Config::default(),
     );
-
     let lora1_spi = ExclusiveDevice::new(lora1_spi, lora1_nss, Delay);
-    info!("running");
     let lora1_config = sx128x::Config {
         chip: Sx1281,
         tcxo_used: true,
+        rx_boost: true,
         tx_boost: true,
-        rx_boost: false,
     };
     let lora1_iv = GenericSx128xInterfaceVariant::new(
         lora1_reset,
@@ -80,8 +79,6 @@ async fn main(spawner: Spawner) {
         Some(lora1_tx_en),
     )
     .unwrap();
-    info!("Created GenericSx128xInterfaceVariant");
-
     let lora1 = LoRa::new(Sx128x::new(lora1_spi, lora1_iv, lora1_config), false, Delay)
         .await
         .unwrap();
@@ -108,8 +105,8 @@ async fn main(spawner: Spawner) {
     let lora2_config = sx128x::Config {
         chip: Sx1281,
         tcxo_used: true,
-        tx_boost: true,
         rx_boost: true,
+        tx_boost: true,
     };
     let lora2_iv = GenericSx128xInterfaceVariant::new(
         lora2_reset,
@@ -156,7 +153,7 @@ async fn main(spawner: Spawner) {
             static_payload_lora1_send_channel.receiver(),
             static_payload_lora1_receive_channel.sender(),
         ))
-        .expect("Can't spawn receiver task");
+        .expect("Can't spawn Lora1 task");
 
     spawner
         .spawn(lora2_task(
@@ -166,7 +163,7 @@ async fn main(spawner: Spawner) {
             static_payload_lora2_send_channel.receiver(),
             static_payload_lora2_receive_channel.sender(),
         ))
-        .expect("Can't spawn receiver task");
+        .expect("Can't spawn Lora2 task");
 
     uart_task(
         uart,

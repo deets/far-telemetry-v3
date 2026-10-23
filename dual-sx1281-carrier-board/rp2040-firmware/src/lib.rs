@@ -15,7 +15,6 @@ use lora_phy::mod_traits::RadioKind;
 use lora_phy::sx128x::{Sx1281, Sx128x};
 use lora_phy::DelayNs;
 use lora_phy::LoRa;
-use rq2_telemetry_parser::ErrorCode::InvalidCommand;
 use rq2_telemetry_parser::{
     Bandwidth as Rq2Bandwidth, CodingRate as Rq2CodingRate, Command, ErrorCode, Mode, Module,
     Request, Response, SpreadingFactor as Rq2SpreadingFactor,
@@ -113,37 +112,6 @@ impl From<RadioError> for Error {
     }
 }
 
-struct DebugModulationParams<'a> {
-    modulation_params: &'a ModulationParams,
-}
-
-impl<'a> core::fmt::Debug for DebugModulationParams<'a> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("DebugModulationParams")
-            .field("spreading_factor", &self.modulation_params.spreading_factor)
-            .field("bandwidth", &self.modulation_params.bandwidth)
-            .field("coding_rate", &self.modulation_params.coding_rate)
-            .field("frequency_in_hz", &self.modulation_params.frequency_in_hz)
-            .finish()
-    }
-}
-
-struct DebugPacketParams<'a> {
-    packet_params: &'a PacketParams,
-}
-
-impl<'a> core::fmt::Debug for DebugPacketParams<'a> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("DebugPacketParams")
-            .field("preamble_length", &self.packet_params.preamble_length)
-            .field("implicit_header", &self.packet_params.implicit_header)
-            .field("payload_length", &self.packet_params.payload_length)
-            .field("crc_on", &self.packet_params.crc_on)
-            .field("iq_inverted", &self.packet_params.iq_inverted)
-            .finish()
-    }
-}
-
 impl<RK, DLY> LoraSendingManager<RK, DLY>
 where
     RK: RadioKind,
@@ -155,6 +123,7 @@ where
         sender: &mut Sender<'static, NoopRawMutex, Command, 4>,
         payload_receiver: &mut MessageReceiver,
     ) -> Result<LoraConfigurationManager<RK, DLY>, Error> {
+        debug!("Start sending data");
         loop {
             match select(receiver.receive(), payload_receiver.receive()).await {
                 embassy_futures::select::Either::First(command) => {
@@ -241,7 +210,7 @@ where
         sender: &mut CommandSender,
         payload_sender: &mut MessageSender,
     ) -> Result<LoraConfigurationManager<RK, DLY>, Error> {
-        error!("Start receiving data");
+        debug!("Start receiving data");
         loop {
             let mut buffer = [0; 255];
             // See lora-phy/src/lib.rs:340 why I can't use do_rx
@@ -305,7 +274,7 @@ where
                             .complete_rx(&self.rx_packet_params, &mut buffer)
                             .await
                         {
-                            Ok((len, packet_status)) => {
+                            Ok((len, ..)) => {
                                 let mut message: MessageType = MessageType::new();
                                 match message.extend_from_slice(&buffer[0..len as usize]) {
                                     Ok(_) => match payload_sender.try_send(message) {
@@ -323,7 +292,8 @@ where
                     }
                     Err(e) => {
                         error!(
-                            "error waiting for irq on {:#?}",
+                            "error {:#?} waiting for irq on {:?}",
+                            defmt::Debug2Format(&e),
                             defmt::Debug2Format(&self.destination)
                         );
                         break;
@@ -355,7 +325,7 @@ where
     }
 
     async fn new_with_configuration(
-        mut lora: LoRa<RK, DLY>,
+        lora: LoRa<RK, DLY>,
         destination: Module,
         configuration: LoRaConfiguration,
     ) -> Result<Self, Error> {
@@ -422,7 +392,7 @@ where
                 spreading_factor,
                 coding_rate,
                 frequency,
-                output_power,
+                ..
             },
         ) = self.configuration
         {
@@ -681,22 +651,20 @@ fn cr_convert(coding_rate: Rq2CodingRate) -> CodingRate {
     }
 }
 pub type MessageType = heapless::Vec<u8, 128>;
+pub type CommandChannel = Channel<NoopRawMutex, Command, 4>;
+pub type PayloadChannel = Channel<NoopRawMutex, MessageType, 4>;
 
 type CommandReceiver = Receiver<'static, NoopRawMutex, Command, 4>;
 type CommandSender = Sender<'static, NoopRawMutex, Command, 4>;
 type MessageReceiver = Receiver<'static, NoopRawMutex, MessageType, 4>;
 type MessageSender = Sender<'static, NoopRawMutex, MessageType, 4>;
 
-pub static LORA1_SEND_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
-pub static LORA1_RECEIVE_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
-pub static LORA2_SEND_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
-pub static LORA2_RECEIVE_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
+pub static LORA1_SEND_CHANNEL: StaticCell<CommandChannel> = StaticCell::new();
+pub static LORA1_RECEIVE_CHANNEL: StaticCell<CommandChannel> = StaticCell::new();
+pub static LORA2_SEND_CHANNEL: StaticCell<CommandChannel> = StaticCell::new();
+pub static LORA2_RECEIVE_CHANNEL: StaticCell<CommandChannel> = StaticCell::new();
 
-pub static LORA1_PAYLOAD_SEND_CHANNEL: StaticCell<Channel<NoopRawMutex, MessageType, 4>> =
-    StaticCell::new();
-pub static LORA1_PAYLOAD_RECEIVE_CHANNEL: StaticCell<Channel<NoopRawMutex, MessageType, 4>> =
-    StaticCell::new();
-pub static LORA2_PAYLOAD_SEND_CHANNEL: StaticCell<Channel<NoopRawMutex, MessageType, 4>> =
-    StaticCell::new();
-pub static LORA2_PAYLOAD_RECEIVE_CHANNEL: StaticCell<Channel<NoopRawMutex, MessageType, 4>> =
-    StaticCell::new();
+pub static LORA1_PAYLOAD_SEND_CHANNEL: StaticCell<PayloadChannel> = StaticCell::new();
+pub static LORA1_PAYLOAD_RECEIVE_CHANNEL: StaticCell<PayloadChannel> = StaticCell::new();
+pub static LORA2_PAYLOAD_SEND_CHANNEL: StaticCell<PayloadChannel> = StaticCell::new();
+pub static LORA2_PAYLOAD_RECEIVE_CHANNEL: StaticCell<PayloadChannel> = StaticCell::new();
