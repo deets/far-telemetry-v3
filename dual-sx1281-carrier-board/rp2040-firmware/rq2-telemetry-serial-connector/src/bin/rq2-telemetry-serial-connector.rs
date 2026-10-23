@@ -32,6 +32,7 @@ impl From<Module> for rq2_telemetry_parser::Module {
 #[command(version, about, long_about = None)]
 struct Cli {
     /// Port to open
+    #[arg(long)]
     serial_port: Option<String>,
     /// Module to refer to
     #[arg(long)]

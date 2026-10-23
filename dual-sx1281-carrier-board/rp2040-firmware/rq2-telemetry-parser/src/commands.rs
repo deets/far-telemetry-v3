@@ -1,6 +1,3 @@
-#[cfg(feature = "defmt")]
-use defmt::error;
-
 use crate::encode_frame;
 use crate::seven_bit_decode;
 use crate::seven_bit_encode;
@@ -377,8 +374,6 @@ where
     async fn process_frame(&mut self, frame: &[u8]) -> Result<Option<Command>, DispatcherError> {
         let decoded = seven_bit_decode(&mut self.working, frame)
             .map_err(DispatcherError::SevenBitEncodingError)?;
-        #[cfg(feature = "defmt")]
-        error!("process_frame::decoded: {:?}", decoded);
         Ok(Some(
             from_bytes(decoded).map_err(DispatcherError::PostcardError)?,
         ))
@@ -396,8 +391,6 @@ where
             Ok(FrameResult::Frame(frame)) => {
                 let l = frame.len();
                 frame_copy[0..l].copy_from_slice(frame);
-                #[cfg(feature = "defmt")]
-                error!("feed::frame_copy: {:?}", frame_copy[0..l]);
                 self.process_frame(&frame_copy[0..l]).await
             }
             Ok(Nothing) => Ok(None),
