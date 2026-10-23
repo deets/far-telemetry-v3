@@ -119,7 +119,10 @@ async fn main(spawner: Spawner) {
         Some(lora2_tx_en),
     )
     .unwrap();
-    info!("Created GenericSx128xInterfaceVariant");
+    let lora2 = LoRa::new(Sx128x::new(lora2_spi, lora2_iv, lora2_config), false, Delay)
+        .await
+        .unwrap();
+    info!("Created lora2");
 
     let lora1_send_channel = Channel::<NoopRawMutex, Command, 4>::new();
     let static_lora1_send_channel = LORA1_SEND_CHANNEL.init(lora1_send_channel);
@@ -133,9 +136,6 @@ async fn main(spawner: Spawner) {
     let static_payload_lora1_receive_channel =
         LORA1_PAYLOAD_RECEIVE_CHANNEL.init(lora1_payload_receive_channel);
 
-    let lora2 = LoRa::new(Sx128x::new(lora2_spi, lora2_iv, lora2_config), false, Delay)
-        .await
-        .unwrap();
     let lora2_send_channel = Channel::<NoopRawMutex, Command, 4>::new();
     let static_lora2_send_channel = LORA2_SEND_CHANNEL.init(lora2_send_channel);
     let lora2_receive_channel = Channel::<NoopRawMutex, Command, 4>::new();

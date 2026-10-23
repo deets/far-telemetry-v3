@@ -1,5 +1,5 @@
 #![no_std]
-use defmt::{debug, error};
+use defmt::{debug, error, info};
 use embassy_futures::select::select;
 use embassy_rp::gpio::{Input, Output};
 use embassy_rp::peripherals::{SPI0, SPI1};
@@ -51,16 +51,13 @@ impl TryFrom<Request> for LoRaConfiguration {
                 coding_rate,
                 frequency,
                 output_power,
-            } => {
-                error!("incoming frequency:{}", frequency);
-                Ok(Self {
-                    bandwidth: bw_convert(bandwidth),
-                    spreading_factor: sf_convert(spreading_factor),
-                    coding_rate: cr_convert(coding_rate),
-                    frequency: frequency * 1000_000,
-                    output_power,
-                })
-            }
+            } => Ok(Self {
+                bandwidth: bw_convert(bandwidth),
+                spreading_factor: sf_convert(spreading_factor),
+                coding_rate: cr_convert(coding_rate),
+                frequency: frequency * 1000_000,
+                output_power,
+            }),
             _ => Err(Error::ConfigurationError),
         }
     }
@@ -154,9 +151,9 @@ where
 {
     async fn send(
         mut self,
-        receiver: &mut Receiver<'static, NoopRawMutex, Command, 4>,
+        receiver: &mut CommandReceiver,
         sender: &mut Sender<'static, NoopRawMutex, Command, 4>,
-        payload_receiver: &mut Receiver<'static, NoopRawMutex, MessageType, 4>,
+        payload_receiver: &mut MessageReceiver,
     ) -> Result<LoraConfigurationManager<RK, DLY>, Error> {
         loop {
             match select(receiver.receive(), payload_receiver.receive()).await {
@@ -171,6 +168,10 @@ where
                                     .await?;
                             }
                             Request::Stop => {
+                                info!(
+                                    "Stopping sending: {:?}",
+                                    defmt::Debug2Format(&self.destination)
+                                );
                                 send_response(sender, self.destination, command_id, Response::Ack)
                                     .await?;
                                 break;
@@ -195,9 +196,15 @@ where
                             }
                         },
                         // This is caught by the surrounding host interdace
-                        rq2_telemetry_parser::Payload::Data(items) => unreachable!(),
-                        rq2_telemetry_parser::Payload::Response { .. } => {
-                            error!("Received Response command");
+                        data @ rq2_telemetry_parser::Payload::Data(..) => error!(
+                            "Received invalid command: {:#?}",
+                            defmt::Debug2Format(&data)
+                        ),
+                        response @ rq2_telemetry_parser::Payload::Response { .. } => {
+                            error!(
+                                "Received invalid command: {:#?}",
+                                defmt::Debug2Format(&response)
+                            );
                         }
                     }
                 }
@@ -214,11 +221,12 @@ where
                 }
             }
         }
-        Ok(LoraConfigurationManager {
-            lora: self.lora,
-            configuration: Some(self.configuration),
-            destination: self.destination,
-        })
+        LoraConfigurationManager::new_with_configuration(
+            self.lora,
+            self.destination,
+            self.configuration,
+        )
+        .await
     }
 }
 
@@ -229,19 +237,16 @@ where
 {
     async fn receive(
         mut self,
-        receiver: &mut Receiver<'static, NoopRawMutex, Command, 4>,
-        sender: &mut Sender<'static, NoopRawMutex, Command, 4>,
-        payload_sender: &mut Sender<'static, NoopRawMutex, MessageType, 4>,
+        receiver: &mut CommandReceiver,
+        sender: &mut CommandSender,
+        payload_sender: &mut MessageSender,
     ) -> Result<LoraConfigurationManager<RK, DLY>, Error> {
         error!("Start receiving data");
         loop {
             let mut buffer = [0; 255];
-            match select(
-                receiver.receive(),
-                self.lora.rx(&self.rx_packet_params, &mut buffer),
-            )
-            .await
-            {
+            // See lora-phy/src/lib.rs:340 why I can't use do_rx
+            self.lora.start_rx().await?;
+            match select(receiver.receive(), self.lora.wait_for_irq()).await {
                 embassy_futures::select::Either::First(command) => {
                     match command.payload {
                         rq2_telemetry_parser::Payload::Request {
@@ -253,6 +258,10 @@ where
                                     .await?;
                             }
                             Request::Stop => {
+                                info!(
+                                    "Stopping receiving: {:?}",
+                                    defmt::Debug2Format(&self.destination)
+                                );
                                 send_response(sender, self.destination, command_id, Response::Ack)
                                     .await?;
                                 break;
@@ -277,35 +286,57 @@ where
                             }
                         },
                         // This is caught by the surrounding host interdace
-                        rq2_telemetry_parser::Payload::Data(items) => unreachable!(),
-                        rq2_telemetry_parser::Payload::Response { .. } => {
-                            error!("Received Response command");
+                        data @ rq2_telemetry_parser::Payload::Data(..) => error!(
+                            "Received invalid command: {:#?}",
+                            defmt::Debug2Format(&data)
+                        ),
+                        response @ rq2_telemetry_parser::Payload::Response { .. } => {
+                            error!(
+                                "Received invalid command: {:#?}",
+                                defmt::Debug2Format(&response)
+                            );
                         }
                     }
                 }
-                embassy_futures::select::Either::Second(rx_result) => match rx_result {
-                    Ok((len, packet_status)) => {
-                        let mut message: MessageType = MessageType::new();
-                        match message.extend_from_slice(&buffer[0..len as usize]) {
-                            Ok(_) => match payload_sender.try_send(message) {
-                                Ok(_) => {}
-                                Err(_) => error!("Can't send payload"),
-                            },
-                            Err(_) => todo!(),
+                embassy_futures::select::Either::Second(r) => match r {
+                    Ok(_) => {
+                        match self
+                            .lora
+                            .complete_rx(&self.rx_packet_params, &mut buffer)
+                            .await
+                        {
+                            Ok((len, packet_status)) => {
+                                let mut message: MessageType = MessageType::new();
+                                match message.extend_from_slice(&buffer[0..len as usize]) {
+                                    Ok(_) => match payload_sender.try_send(message) {
+                                        Ok(_) => {}
+                                        Err(_) => error!("Can't send payload, discarding"),
+                                    },
+                                    Err(_) => todo!(),
+                                }
+                            }
+                            Err(e) => {
+                                error!("complete_rx failed: {:#?}", defmt::Debug2Format(&e));
+                                break;
+                            }
                         }
                     }
-                    Err(_) => {
-                        error!("Can't receive packet");
+                    Err(e) => {
+                        error!(
+                            "error waiting for irq on {:#?}",
+                            defmt::Debug2Format(&self.destination)
+                        );
                         break;
                     }
                 },
             }
         }
-        Ok(LoraConfigurationManager {
-            lora: self.lora,
-            configuration: Some(self.configuration),
-            destination: self.destination,
-        })
+        LoraConfigurationManager::new_with_configuration(
+            self.lora,
+            self.destination,
+            self.configuration,
+        )
+        .await
     }
 }
 
@@ -314,19 +345,34 @@ where
     RK: RadioKind,
     DLY: DelayNs,
 {
+    async fn new(mut lora: LoRa<RK, DLY>, destination: Module) -> Result<Self, Error> {
+        lora.init().await?;
+        Ok(Self {
+            lora,
+            destination,
+            configuration: None,
+        })
+    }
+
+    async fn new_with_configuration(
+        mut lora: LoRa<RK, DLY>,
+        destination: Module,
+        configuration: LoRaConfiguration,
+    ) -> Result<Self, Error> {
+        let mut manager = Self::new(lora, destination).await?;
+        manager.configuration = Some(configuration);
+        Ok(manager)
+    }
+
     fn set_configuration(&mut self, request: Request) -> Result<(), Error> {
         let configuration = request.try_into()?;
-        error!(
-            "incoming configuration: {:#?}",
-            defmt::Debug2Format(&request)
-        );
         self.configuration = Some(configuration);
         Ok(())
     }
 
     async fn start_sending(
         mut self,
-        sender: &mut Sender<'static, NoopRawMutex, Command, 4>,
+        sender: &mut CommandSender,
         command_id: u8,
     ) -> Result<CommandResult<RK, DLY>, Error> {
         if let Some(
@@ -367,7 +413,7 @@ where
 
     async fn start_receiving(
         mut self,
-        sender: &mut Sender<'static, NoopRawMutex, Command, 4>,
+        sender: &mut CommandSender,
         command_id: u8,
     ) -> Result<CommandResult<RK, DLY>, Error> {
         if let Some(
@@ -410,7 +456,7 @@ where
 
     async fn process_command(
         mut self,
-        sender: &mut Sender<'static, NoopRawMutex, Command, 4>,
+        sender: &mut CommandSender,
         command: Command,
     ) -> Result<CommandResult<RK, DLY>, Error> {
         match command.payload {
@@ -505,7 +551,7 @@ where
 }
 
 async fn send_response(
-    sender: &mut Sender<'static, NoopRawMutex, Command, 4>,
+    sender: &mut CommandSender,
     destination: rq2_telemetry_parser::Module,
     command_id: u8,
     response: Response,
@@ -523,10 +569,10 @@ async fn send_response(
 
 async fn lora_work<RK: RadioKind, DLY: DelayNs>(
     mut manager: LoraConfigurationManager<RK, DLY>,
-    mut receiver: Receiver<'static, NoopRawMutex, Command, 4>,
-    mut sender: Sender<'static, NoopRawMutex, Command, 4>,
-    mut payload_receiver: Receiver<'static, NoopRawMutex, MessageType, 4>,
-    mut payload_sender: Sender<'static, NoopRawMutex, MessageType, 4>,
+    mut receiver: CommandReceiver,
+    mut sender: CommandSender,
+    mut payload_receiver: MessageReceiver,
+    mut payload_sender: MessageSender,
 ) -> Result<(), Error> {
     loop {
         let command = receiver.receive().await;
@@ -556,16 +602,14 @@ pub async fn lora1_task(
         >,
         Delay,
     >,
-    receiver: Receiver<'static, NoopRawMutex, Command, 4>,
-    sender: Sender<'static, NoopRawMutex, Command, 4>,
-    payload_receiver: Receiver<'static, NoopRawMutex, MessageType, 4>,
-    payload_sender: Sender<'static, NoopRawMutex, MessageType, 4>,
+    receiver: CommandReceiver,
+    sender: CommandSender,
+    payload_receiver: MessageReceiver,
+    payload_sender: MessageSender,
 ) {
-    let manager = LoraConfigurationManager {
-        lora: lora1,
-        configuration: None,
-        destination: Module::Lora1,
-    };
+    let manager = LoraConfigurationManager::new(lora1, Module::Lora1)
+        .await
+        .expect("Can't init Lora1-Module");
 
     match lora_work(manager, receiver, sender, payload_receiver, payload_sender).await {
         Ok(_) => {}
@@ -588,16 +632,15 @@ pub async fn lora2_task(
         >,
         Delay,
     >,
-    receiver: Receiver<'static, NoopRawMutex, Command, 4>,
-    sender: Sender<'static, NoopRawMutex, Command, 4>,
-    payload_receiver: Receiver<'static, NoopRawMutex, MessageType, 4>,
-    payload_sender: Sender<'static, NoopRawMutex, MessageType, 4>,
+    receiver: CommandReceiver,
+    sender: CommandSender,
+    payload_receiver: MessageReceiver,
+    payload_sender: MessageSender,
 ) {
-    let manager = LoraConfigurationManager {
-        lora: lora2,
-        configuration: None,
-        destination: Module::Lora2,
-    };
+    let manager = LoraConfigurationManager::new(lora2, Module::Lora2)
+        .await
+        .expect("Can't init Lora2-Module");
+
     match lora_work(manager, receiver, sender, payload_receiver, payload_sender).await {
         Ok(_) => {}
         Err(e) => {
@@ -637,8 +680,13 @@ fn cr_convert(coding_rate: Rq2CodingRate) -> CodingRate {
         Rq2CodingRate::_4_8 => CodingRate::_4_8,
     }
 }
-
 pub type MessageType = heapless::Vec<u8, 128>;
+
+type CommandReceiver = Receiver<'static, NoopRawMutex, Command, 4>;
+type CommandSender = Sender<'static, NoopRawMutex, Command, 4>;
+type MessageReceiver = Receiver<'static, NoopRawMutex, MessageType, 4>;
+type MessageSender = Sender<'static, NoopRawMutex, MessageType, 4>;
+
 pub static LORA1_SEND_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
 pub static LORA1_RECEIVE_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();
 pub static LORA2_SEND_CHANNEL: StaticCell<Channel<NoopRawMutex, Command, 4>> = StaticCell::new();

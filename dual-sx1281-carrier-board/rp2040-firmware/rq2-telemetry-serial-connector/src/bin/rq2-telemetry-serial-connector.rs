@@ -121,6 +121,8 @@ enum Commands {
         payload: String,
     },
     Receive,
+    /// Ask the module to go back to idle
+    Stop,
     /// Setup both modules (ignoring destination)
     /// to the same configuration, and put one
     /// into Tx, the other into RxContinuous.
@@ -369,6 +371,7 @@ async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
                             frequency,
                         },
                         Commands::Receive => Request::Receive,
+                        Commands::Stop => Request::Stop,
                         Commands::AirLoop { .. } => unreachable!(),
                         Commands::Send { .. } => unreachable!(),
                     },
@@ -377,7 +380,10 @@ async fn work(args: Cli, serial_port: String) -> eyre::Result<()> {
                 .map_err(|_| eyre::eyre!("Can't process request!"))?;
             debug!("command: {:#?}", command);
             send_command(&mut port, command).await?;
-            receive_command(&mut port, &mut incoming_processor, &mut command_processor).await?;
+            println!(
+                "{:#?}",
+                receive_command(&mut port, &mut incoming_processor, &mut command_processor).await?
+            );
             Ok(())
         }
     }
